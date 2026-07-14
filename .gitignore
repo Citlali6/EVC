@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+
+# Local environments and editor files
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+.agents/
+.codex/
+
+# Dataset, checkpoints, generated results, and experiment tracking
+dataset/EV-UAV-dataset/
+log/
+mlruns/
+
+# Native extension build outputs
+lib/hais_ops/build/
+lib/hais_ops/*.egg-info/
+
+# Local configuration and caches
+.cache/
+*.log

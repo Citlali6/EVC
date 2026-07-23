@@ -1,14 +1,57 @@
 # EVSOD
 
-EVSOD 是一个用于复现并改进 **EV-SpSegNet** 的研究仓库，面向 EV-UAV 事件相机微小目标检测基准。仓库提供可运行的基线代码、显存受限配置和后续改进实验的基础规范。
+## 基于 EV-SpSegNet 的事件相机微小目标检测复现与改进
 
-> 本仓库基于 ICCV 2025 论文 *Event-based Tiny Object Detection: A Benchmark Dataset and Baseline* 的官方实现整理。EV-SpSegNet、EV-UAV 数据集及其预训练权重的原始贡献均属于原论文作者；本仓库不将基线方法或数据集作为新的方法或数据集主张。
+EVSOD 是一个用于复现、评估和改进 **EV-SpSegNet** 的研究仓库，面向 EV-UAV 事件相机无人机微小目标检测基准。
+
+> 本仓库基于 ICCV 2025 论文 *Event-based Tiny Object Detection: A Benchmark Dataset and Baseline* 的官方实现整理。EV-SpSegNet、EV-UAV 数据集和预训练权重的原始贡献均属于原论文作者；本仓库不将基线方法或数据集作为新的方法或数据集主张。
+
+---
+
+## 操作导航
+
+| 目标 | 使用的脚本或配置 | 是否写入预测文本 |
+| --- | --- | --- |
+| 测试官方预训练权重 | `test.py` + `evisseg_evuav.yaml` | 否 |
+| 检查训练流程是否可运行 | `train.py` + `evisseg_evuav_smoke.yaml` | 否 |
+| 在 4GB 显存设置下训练 | `train.py` + `evisseg_evuav_4gb.yaml` | 否 |
+| 从头训练完整基线 | `train.py` + `evisseg_evuav_scratch.yaml` | 否 |
+| 在赛道二验证集上计算指标和总分 | `test2.py` + `evisseg_evuav_challenge2.yaml` | 否 |
+| 生成赛道二提交文件 | 官方 `val_Challenge2.py` | 是，生成 `val-pred-txt/*.txt` |
+
+---
+
+## 目录结构
+
+```text
+EVSOD/
+|-- configs/
+|   |-- evisseg_evuav.yaml              # 官方预训练权重测试配置
+|   |-- evisseg_evuav_4gb.yaml          # 4GB 显存训练配置
+|   |-- evisseg_evuav_smoke.yaml        # 1 epoch 烟雾测试配置
+|   |-- evisseg_evuav_scratch.yaml      # 完整事件数的从头训练配置
+|   `-- evisseg_evuav_challenge2.yaml   # 赛道二验证与评分配置
+|-- dataset/
+|   |-- EV-UAV-dataset/                 # 原始本地数据集，不提交到 Git
+|   `-- 训练集、验证集/                  # 赛道二官方数据包，不提交到 Git
+|-- lib/hais_ops/                        # 自定义 CUDA 扩展 HAIS_OP
+|-- model/                               # EV-SpSegNet 网络实现
+|-- utils/                               # STC Loss 和评估工具
+|-- train.py                             # 训练入口
+|-- test.py                              # 原始测试集评估入口
+|-- test2.py                             # 赛道二验证集评分入口
+`-- log/                                 # 本地权重、预测和实验结果，不提交到 Git
+```
+
+`.gitignore` 会排除数据集、权重、日志、MLflow 记录和 CUDA 编译产物。不要执行会把这些本地文件加入版本库的强制提交操作。
+
+---
 
 ## 方法摘要
 
 EV-SpSegNet 将事件相机微小目标检测建模为稀疏点云分割问题。运动目标在时空事件点云中通常形成连续轨迹，而背景噪声更常表现为孤立、弱相关的事件。
 
-基线由以下部分构成：
+基线由以下部分组成：
 
 - **GDSCA**：分组空洞稀疏卷积，用于提取多尺度时空特征。
 - **Sp-SE**：稀疏特征融合模块。
@@ -19,35 +62,28 @@ EV-SpSegNet 将事件相机微小目标检测建模为稀疏点云分割问题�
 
 EV-UAV 基准包含 147 段带事件级标注的序列。原论文报告的无人机目标平均尺寸约为 6.8 x 5.4 像素，属于极小目标检测场景。
 
-## 代码结构
-
-```text
-EVSOD/
-|-- configs/                 # 原始基线、从头训练、烟雾测试、4 GB 显存配置
-|-- dataset/
-|   |-- EV-UAV-dataset/      # 本地数据集目录，不提交到 Git
-|   `-- ev_uav.py            # EV-UAV 数据集读取逻辑
-|-- lib/hais_ops/            # 自定义 CUDA 扩展 HAIS_OP
-|-- model/                   # EV-SpSegNet 网络实现
-|-- utils/                   # STC Loss 与评估工具
-|-- train.py                 # 训练入口
-|-- test.py                  # 测试入口
-`-- log/                     # 本地权重和结果，不提交到 Git
-```
+---
 
 ## 环境配置
 
-本地复现使用 WSL Ubuntu 和支持 CUDA 的 NVIDIA GPU。已经跑通的核心环境如下：
+### 已验证的软件版本
 
 | 组件 | 版本 |
 | --- | --- |
+| WSL | Ubuntu + NVIDIA GPU 支持 |
 | Python | 3.9 |
 | PyTorch | 1.9.1 + CUDA 11.1 (`cu111`) |
 | torchvision | 0.10.1 + CUDA 11.1 (`cu111`) |
-| 编译 HAIS_OP 使用的 CUDA Toolkit | CUDA 11.x（仅从源码编译时需要） |
+| 编译 HAIS_OP 使用的 CUDA Toolkit | CUDA 11.x，仅从源码编译时需要 |
 | NumPy | `< 2` |
 
-下面的命令以项目目录 `/mnt/d/AI/ESOD/EVSOD` 为例。如果你保留当前目录名，请将它替换为 `/mnt/d/AI/ESOD/EV-UAV-main`。开始前先确认 WSL 能识别显卡：
+以下命令以当前项目路径为例：
+
+```bash
+export PROJECT_DIR=/mnt/d/AI/ESOD/EV-UAV-main
+```
+
+开始前确认 WSL 能识别显卡：
 
 ```bash
 nvidia-smi
@@ -55,7 +91,7 @@ nvidia-smi
 
 ### 1. 下载 CUDA 版 PyTorch wheel
 
-为避免 conda 自动解析到 CPU 版 PyTorch，使用与 Python 3.9 对应的 CUDA 11.1 wheel。下载中断后重新执行同一条命令即可从已下载位置继续：
+为避免 conda 自动安装 CPU 版 PyTorch，使用 Python 3.9 对应的 CUDA 11.1 wheel。下载中断后重复执行相同命令即可续传。
 
 ```bash
 mkdir -p "$HOME/.cache/evuav-wheels"
@@ -70,16 +106,16 @@ curl -fL -C - --retry 20 --retry-all-errors --connect-timeout 20 \
   "https://mirrors.aliyun.com/pytorch-wheels/cu111/torchvision-0.10.1%2Bcu111-cp39-cp39-linux_x86_64.whl"
 ```
 
-若 `curl` 长时间保持 `0 B/s`，通常是镜像连接暂时无响应；可中断后晚些时候执行相同命令续传。不要安装不完整的 `.whl` 文件。
+若 `curl` 长时间保持 `0 B/s`，通常是镜像暂时无响应。不要安装未下载完整的 `.whl` 文件。
 
-### 2. 创建隔离 conda 环境
+### 2. 创建 conda 环境
 
 ```bash
 conda create -n EV39 python=3.9 pip -y
 conda activate EV39
 ```
 
-如果此前创建过同名环境并且准备完全重建，先执行以下命令，再运行上面的创建命令：
+如需完全重建同名环境：
 
 ```bash
 conda env remove -n EV39 -y
@@ -87,7 +123,7 @@ conda env remove -n EV39 -y
 
 ### 3. 安装 Python 依赖
 
-以下命令使用阿里云 PyPI 镜像安装除 PyTorch 之外的依赖。这里不使用 conda 安装 PyTorch，以避免被解析为 CPU 构建：
+以下命令使用阿里云 PyPI 镜像安装除 PyTorch 外的依赖：
 
 ```bash
 python -m pip install --upgrade pip
@@ -97,7 +133,7 @@ python -m pip install -i https://mirrors.aliyun.com/pypi/simple/ \
   typing-extensions==4.12.2 pillow==10.4.0
 ```
 
-### 4. 从本地 wheel 安装 CUDA 版 PyTorch
+### 4. 安装 CUDA 版 PyTorch
 
 ```bash
 python -m pip install --no-deps \
@@ -105,34 +141,36 @@ python -m pip install --no-deps \
   "$HOME/.cache/evuav-wheels/torchvision-0.10.1+cu111-cp39-cp39-linux_x86_64.whl"
 ```
 
-### 5. 验证 PyTorch 能调用 GPU
+验证 GPU PyTorch：
 
 ```bash
 python -c "import torch; print('torch:', torch.__version__, 'cuda:', torch.version.cuda, 'available:', torch.cuda.is_available())"
 ```
 
-输出中必须包含 `cuda: 11.1` 和 `available: True`。如果 `available` 为 `False`，先解决 WSL GPU 驱动或 PyTorch 安装问题，不要继续运行训练和测试。
+输出中必须包含 `cuda: 11.1` 和 `available: True`。
 
-### 6. 配置 HAIS_OP
+### 5. 配置 HAIS_OP
 
-`HAIS_OP` 是项目使用的自定义 CUDA 扩展。`lib/hais_ops/build/` 是本地编译产物，已被 `.gitignore` 排除，因此 **GitHub 新克隆的仓库不包含预编译二进制文件**。
+`HAIS_OP` 是项目使用的自定义 CUDA 扩展。`lib/hais_ops/build/` 是本地编译产物，被 `.gitignore` 排除，因此 GitHub 新克隆的仓库不包含预编译二进制文件。
 
-如果你在已跑通的本地工作区中保留了 Python 3.9 的预编译产物，可直接加载：
+已有 Python 3.9 预编译产物时，在每个新 WSL 终端执行：
 
 ```bash
+conda activate EV39
 export PROJECT_DIR=/mnt/d/AI/ESOD/EV-UAV-main
 export PYTHONPATH=$PROJECT_DIR/lib/hais_ops/build/lib.linux-x86_64-cpython-39:$PYTHONPATH
 export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.9/site-packages/torch/lib:$CONDA_PREFIX/lib:/usr/lib/wsl/lib:$LD_LIBRARY_PATH
+cd $PROJECT_DIR
 python -c "import torch; import spconv.pytorch; import HAIS_OP; print('HAIS_OP ok')"
 ```
 
-如果是全新克隆，或上面的目录不存在，则必须从源码编译。系统需要安装 `libsparsehash-dev`、兼容的 C++ 编译器和完整 CUDA Toolkit；`nvcc --version` 必须成功。PyTorch wheel 内的 CUDA 运行时不能替代 `nvcc` 和 CUDA 头文件。安装好系统依赖后执行：
+全新克隆且没有预编译产物时，需要完整 CUDA Toolkit、兼容的 C++ 编译器及 `libsparsehash-dev`，随后从源码编译：
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential libsparsehash-dev ninja-build
 
-cd /mnt/d/AI/ESOD/EVSOD/lib/hais_ops
+cd $PROJECT_DIR/lib/hais_ops
 export CUDA_HOME=/path/to/your/cuda
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
@@ -141,56 +179,48 @@ python setup.py build_ext develop
 python -c "import HAIS_OP; print('HAIS_OP ok')"
 ```
 
-CUDA 11.x 对宿主编译器版本有约束。若编译报出 `g++` 版本过高，请安装与本机 CUDA Toolkit 兼容的 GCC/G++，并通过 `CC`、`CXX` 和 `CUDAHOSTCXX` 显式指定，而不要修改项目源码来绕过编译器检查。
+`nvcc --version` 必须能正常输出版本。若 CUDA 报错 `g++` 版本过高，请安装与当前 CUDA Toolkit 兼容的 GCC/G++，并通过 `CC`、`CXX`、`CUDAHOSTCXX` 显式指定。
 
-### 7. 每次打开新 WSL 终端
+---
 
-在已有预编译 `HAIS_OP` 的工作区中，每次新开终端至少执行：
+## 数据集与权重
 
-```bash
-conda activate EV39
-export PROJECT_DIR=/mnt/d/AI/ESOD/EV-UAV-main
-export PYTHONPATH=$PROJECT_DIR/lib/hais_ops/build/lib.linux-x86_64-cpython-39:$PYTHONPATH
-export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.9/site-packages/torch/lib:$CONDA_PREFIX/lib:/usr/lib/wsl/lib:$LD_LIBRARY_PATH
-cd $PROJECT_DIR
-```
-
-若通过源码编译并使用 `develop` 安装扩展，通常不需要设置 `PYTHONPATH`；但仍需要激活正确的 conda 环境。
-
-## 数据集与预训练权重
-
-数据集、预训练权重、训练日志和实验结果均不会提交到本仓库。请通过原项目的官方链接下载：
+数据集、预训练权重、训练日志和实验结果均不会提交到本仓库，请通过原项目官方链接下载：
 
 - EV-UAV 数据集：[百度网盘](https://pan.baidu.com/s/15pAlu3KP1uXych-c3SC5qA?pwd=sbr2)（提取码：`sbr2`）或 [Google Drive](https://drive.google.com/drive/folders/1VIkBFx5Po0KPIFBYOL_appLVie5wgdyi?usp=drive_link)
 - EV-SpSegNet 预训练权重：[百度网盘](https://pan.baidu.com/s/1e6a_Ool5WZ3cBMPvoJvWbg?pwd=ztp4)（提取码：`ztp4`）或 [Google Drive](https://drive.google.com/file/d/1nNZsckiN0qp2oo1uX40tU6oz3mUcrSHq/view?usp=drive_link)
 
-建议放置为以下本地目录结构：
+基础数据集目录应包含：
 
 ```text
 dataset/EV-UAV-dataset/
 |-- train/
 |-- val/
 `-- test/
-
-log/model/best_iou_seed37.pt
 ```
 
-运行前，请在所选 YAML 配置中修改以下路径为自己的 WSL 路径：`DATA.root`、`TRAIN.model_save_root` 和 `TEST.model_path`。
+赛道二官方数据包应包含：
 
-## 快速运行
+```text
+dataset/训练集、验证集/
+|-- train/
+|-- val/
+`-- val_Challenge2.py
+```
 
-### 1. 测试官方预训练基线
+运行前，请确认 YAML 中的 `DATA.root`、`TRAIN.model_save_root` 和 `TEST.model_path` 都是本机的 WSL 路径。
 
-在 `configs/evisseg_evuav.yaml` 中将 `TEST.model_path` 指向 `best_iou_seed37.pt`，然后执行：
+---
+
+## 基线训练与测试
+
+### 官方预训练权重测试
 
 ```bash
-cd /mnt/d/AI/ESOD/EVSOD
-conda activate EV39
-mkdir -p log/model
 python test.py --config configs/evisseg_evuav.yaml
 ```
 
-本地已完成 24 个测试视频的推理，得到以下参考结果：
+本地一次已跑通的参考结果：
 
 ```text
 iou: 0.5843424201011658
@@ -199,65 +229,157 @@ pd: 0.7846212700841622
 fa: 8.493834145404406e-06
 ```
 
-上述数值仅为本地运行参考，不替代完整、独立的复现实验流程。
+### 训练烟雾测试
 
-### 2. 训练烟雾测试
-
-烟雾测试配置每段训练序列最多采样 100,000 个事件，只训练 1 个 epoch。它用于验证数据读取、CUDA 扩展、前向和反向传播、权重保存以及评估流程是否都能正常运行。
+该配置以 `max_events_num: 100000` 训练 1 个 epoch，只用于检查数据读取、CUDA 扩展、前向反向传播、权重保存和评估流程，不代表最终性能。
 
 ```bash
 python train.py --config configs/evisseg_evuav_smoke.yaml
 python test.py --config configs/evisseg_evuav_smoke.yaml
 ```
 
-单个 epoch 的烟雾测试不应被视为有意义的检测性能结果。
-
-### 3. 从头训练基线
-
-使用原始事件上限并训练 50 个 epoch：
-
-```bash
-python train.py --config configs/evisseg_evuav_scratch.yaml
-python test.py --config configs/evisseg_evuav_scratch.yaml
-```
-
-原始配置使用 `max_events_num: 700000`，显存占用较高。`configs/evisseg_evuav_4gb.yaml` 使用 `max_events_num: 100000` 并写入独立的输出目录，面向显存受限情况下的训练：
+### 4GB 显存训练
 
 ```bash
 python train.py --config configs/evisseg_evuav_4gb.yaml
 python test.py --config configs/evisseg_evuav_4gb.yaml
 ```
 
-降低 `max_events_num` 会改变训练数据分布和最终指标，可用于功能验证或显存受限实验；与完整事件基线比较时必须单独报告该设置。
+该配置在训练时最多随机采样 `100000` 个事件。降低 `max_events_num` 会改变训练点云密度和目标轨迹完整性，因而会影响 `IoU`、`Acc`、`Pd`、`Fa` 和比赛得分。它适合小显存开发和方案筛选，但不能与完整事件数基线直接等价比较。
+
+### 从头训练完整基线
+
+```bash
+python train.py --config configs/evisseg_evuav_scratch.yaml
+python test.py --config configs/evisseg_evuav_scratch.yaml
+```
+
+完整配置使用 `max_events_num: 700000`，显存需求较高。
+
+---
+
+## 赛道二验证与评分
+
+### `test.py`、`test2.py` 与官方提交脚本的区别
+
+| 脚本 | 使用的数据划分 | 作用 | 输出 |
+| --- | --- | --- | --- |
+| `test.py` | `test/` | 原始项目的测试集评估 | IoU、seg_acc、Pd、Fa |
+| `test2.py` | 赛道二数据包中的 `val/` | 本地验证模型并计算赛道二总分 | IoU、Acc、Pd、Fa、Score_Fa、Score |
+| `val_Challenge2.py` | 赛道二数据包中的 `val/` | 生成比赛提交格式 | 每个视频一个 `val_xxx.txt` |
+
+`test2.py` 不训练模型、不读取 `test/`、也不写提交文本。它加载 YAML 的 `TEST.model_path`，对验证集推理并使用真实标注计算本地指标。
+
+### 运行赛道二验证
+
+默认配置 [configs/evisseg_evuav_challenge2.yaml](configs/evisseg_evuav_challenge2.yaml) 指向：
+
+- 验证集：`dataset/训练集、验证集/val/`
+- 权重：`log/baseline_4gb_seed37/best_iou_seed37.pt`
+
+### 赛道二运行前必须确认的配置
+
+| 文件 | 项目 | 需要改成什么 | 是否每次实验都需要改 |
+| --- | --- | --- | --- |
+| `configs/evisseg_evuav_challenge2.yaml` | `DATA.root` | 赛道二数据包的父目录，例如 `/mnt/d/AI/ESOD/EV-UAV-main/dataset/训练集、验证集`。该目录下必须有 `val/`。 | 仅路径变化时修改。 |
+| `configs/evisseg_evuav_challenge2.yaml` | `TEST.model_path` | 当前要评估的 `best_iou_seed37.pt` 的绝对 WSL 路径。 | 每次更换模型权重时修改。 |
+| `configs/evisseg_evuav_challenge2.yaml` | `TEST.eval`、`TEST.roc` | 必须保持为 `True`，否则无法计算全部四项指标和总分。 | 不要修改。 |
+| `configs/evisseg_evuav_challenge2.yaml` | `TEST.pd_detT`、`TEST.correct_thresh` | 保持比赛/基线评估使用的 `50` 与 `0.0001`。 | 不要为了提高本地分数而随意修改。 |
+| `test2.py` | `PREDICTION_THRESHOLD` | 保持 `0.9`，与官方 `val_Challenge2.py` 一致。 | 不要修改，除非比赛官方明确更改规则。 |
+| `test2.py` | 其他代码 | 无需修改。权重、数据目录均从 YAML 读取。 | 不需要修改。 |
+
+`TRAIN` 段的 `epochs`、`lr`、`max_events_num` 在 `test2.py` 推理时不会重新训练模型；它们保留在 YAML 中是为了记录该权重对应的训练设置。
+
+```bash
+conda activate EV39
+export PROJECT_DIR=/mnt/d/AI/ESOD/EV-UAV-main
+export PYTHONPATH=$PROJECT_DIR/lib/hais_ops/build/lib.linux-x86_64-cpython-39:$PROJECT_DIR:$PYTHONPATH
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.9/site-packages/torch/lib:$CONDA_PREFIX/lib:/usr/lib/wsl/lib:$LD_LIBRARY_PATH
+cd $PROJECT_DIR
+python test2.py --config configs/evisseg_evuav_challenge2.yaml
+```
+
+运行开始时，脚本会打印实际的验证集路径、视频数量、权重路径及预测阈值。若这些信息不符合预期，应停止并修正 YAML，而不是继续比较分数。
+
+### 得分细则
+
+赛道二使用固定预测阈值 `0.9`，并按以下公式计算：
+
+```text
+IoU      = |GT ∩ Pred| / |GT ∪ Pred|
+Acc      = TP_target / (TP_target + FN_target)
+Pd       = TD / AT
+Fa       = FD / (N_frame x H x W)
+
+Score_Fa = exp(-10000 x Fa)
+Score    = 0.4 x Pd + 0.3 x Score_Fa + 0.2 x IoU + 0.1 x Acc
+```
+
+| 指标 | 含义 | 对总分的影响 |
+| --- | --- | --- |
+| `IoU` | 前景事件预测与真实前景事件的交并比 | 权重 `0.2` |
+| `Acc` | 真实目标事件被正确预测为前景的比例 | 权重 `0.1` |
+| `Pd` | 被成功检测的目标数占所有目标数的比例 | 权重 `0.4` |
+| `Fa` | 每帧、每像素归一化的虚警目标数 | 经指数惩罚后权重 `0.3` |
+| `Score_Fa` | `exp(-10000 x Fa)` | `Fa` 越小越接近 `1` |
+
+`Fa` 的指数惩罚很敏感。例如 `Fa` 每增加 `1e-5`，`Score_Fa` 会额外乘以约 `exp(-0.1)`，约为 `0.905`。因此比赛优化不能只看 IoU，也必须控制虚警率。
+
+`test2.py` 使用项目原有 `utils/eval.py` 中的 `Pd/Fa` 实现，分辨率为 `346 x 260`，时间帧宽度和目标判定阈值由 YAML 的 `pd_detT` 与 `correct_thresh` 控制。
+
+### 生成赛道二提交文本
+
+官方 `val_Challenge2.py` 位于赛道二数据包中，用于在训练完成后加载权重并生成提交文件。它不会训练模型。
+
+先在脚本顶部设置：
+
+```python
+MODEL_PATH = Path("/mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37/best_iou_seed37.pt")
+OUTPUT_DIR = Path("/mnt/d/AI/ESOD/EV-UAV-main/log/challenge2/val-pred-txt")
+```
+
+然后运行：
+
+```bash
+PYTHONPATH=$PROJECT_DIR:$PYTHONPATH python "dataset/训练集、验证集/val_Challenge2.py" \
+  --config configs/evisseg_evuav_challenge2.yaml
+```
+
+提交目录为：
+
+```text
+log/challenge2/val-pred-txt/
+`-- val_xxx.txt
+```
+
+不要将 `test2.py` 的本地验证总分与 `val_Challenge2.py` 混淆：前者用于评估，后者用于导出提交文本。
+
+---
 
 ## 改进方向
 
-下表中的方向是根据基线局限性提出的研究假设，而非已经证实的结论。每项改动都应独立完成消融实验，并与不改动的基线在相同事件上限下对比。
+下表中的方向是基于基线局限性提出的研究假设，必须通过相同数据划分、随机种子、事件上限和评估规则下的对照实验验证。
 
-| 优先级 | 方向 | 基线局限 | 可尝试的改进 | 核心验证指标 |
+| 优先级 | 方向 | 基线局限 | 可尝试的改进 | 首要验证指标 |
 | --- | --- | --- | --- | --- |
-| P0 | 后处理 | 基线没有专门的后处理，仍有少量孤立虚警，部分短轨迹会断裂。 | 对预测为前景的事件做时空聚类，删除过小或时间跨度过短的噪声簇；再利用速度估计和运动连续性连接短断轨迹。 | 首先观察 `FA` 是否下降，同时保证或提升 `PD`；测量额外推理耗时。 |
-| P1 | 特征提取模块 | GDSCA 的空洞率固定，难以随目标速度、尺度和局部事件密度变化调整感受野，极小目标可能漏检。 | 将固定 GDSCA 替换为可变形分组空洞稀疏卷积，或由局部事件密度预测每组的空洞率/采样偏移。 | `IoU`、`PD`，并按目标尺度和速度分桶分析漏检率。 |
-| P1 | 损失函数 | STC 的邻域大小固定，难以同时适配快慢目标；目标和背景事件数量高度不均衡。 | 设计自适应时空邻域的 STC；与类别平衡权重、Focal 类权重或难例挖掘结合。 | `IoU`、`seg_acc`、`PD`、`FA`，以及正负事件召回率。 |
-| P2 | 多表示融合 | 当前网络只有点云单一表示，强噪声或稀疏事件场景中的特征表达可能不足。 | 增加轻量事件帧分支，与点云分支在中间层进行门控融合或跨注意力融合。 | 全集指标及按光照、噪声场景分组的鲁棒性；显存和延迟。 |
+| P0 | 后处理 | 基线没有专门后处理，仍有孤立虚警和短轨迹断裂。 | 对前景事件做时空聚类，删除过小或过短的噪声簇；按运动连续性连接短断轨迹。 | 优先降低 `Fa`，同时保持或提升 `Pd`。 |
+| P1 | 特征提取 | GDSCA 的空洞率固定，难以适配不同速度、尺度和局部事件密度。 | 可变形分组空洞稀疏卷积，或由局部事件密度预测空洞率和采样偏移。 | `IoU`、`Pd` 和按目标尺度/速度分桶的漏检率。 |
+| P1 | 损失函数 | STC 邻域大小固定，且目标/背景事件高度不均衡。 | 自适应时空邻域 STC，结合类别平衡权重、Focal 类权重或难例挖掘。 | `IoU`、`Acc`、`Pd`、`Fa` 和最终 `Score`。 |
+| P2 | 多表示融合 | 单一点云表示在强噪声和稀疏事件场景下特征不足。 | 增加轻量事件帧分支，并在中间层做门控融合或跨注意力融合。 | 分场景鲁棒性、显存和推理延迟。 |
 
-### 可进一步拓展的方向
+可进一步探索：自适应事件窗口与事件预算、时序关联与轨迹级评估、事件噪声数据增强、轻量化和部署优化。
 
-| 方向 | 动机 | 建议的第一步 |
-| --- | --- | --- |
-| 自适应事件窗口与事件预算 | 固定 `whole_t` 和固定事件上限会让快慢目标获得不均衡的时间上下文，并影响显存。 | 用局部事件率或目标运动估计动态选择时间窗口；先只在数据加载阶段实现，保持网络不变。 |
-| 时序关联与轨迹级评估 | 事件级分割指标不能完全反映目标轨迹是否连续。 | 在测试阶段为前景簇增加跨窗口关联，并补充轨迹连续率、断轨次数和每段序列的 `PD/FA`。 |
-| 面向事件噪声的数据增强 | 强光、低照度和背景抖动会改变事件密度，单一训练分布可能不稳健。 | 依次测试随机事件丢弃、极性扰动、时间抖动和背景噪声注入；每次只启用一种增强。 |
-| 轻量化与部署优化 | 点云稀疏卷积和后处理可能限制实时性。 | 统计各阶段耗时，随后尝试减少通道宽度、知识蒸馏、混合精度和后处理的在线聚类实现。 |
-
-后续实验应固定训练/验证/测试划分、随机种子、评估配置和事件上限，并同时报告 `IoU`、`seg_acc`、`PD`、`FA`、显存占用、训练时间和推理时间。对于新模块，还应报告其参数量和额外延迟。
+---
 
 ## 实验规范
 
-- 保持基线配置不变作为公平对照；每个消融实验新建独立 YAML 配置。
-- 权重不提交到 Git；每次实验记录对应配置、随机种子和 Git commit。
-- 先验证官方预训练权重的推理结果，再完成从头训练复现，最后比较改进方法。
-- 不要将烟雾测试结果当作最终模型性能。
+1. 保持基线配置不变作为公平对照；每个消融实验新增独立 YAML。
+2. 每次实验记录配置、随机种子、Git commit、显存占用、训练时间和推理时间。
+3. 小显存的低事件数实验用于快速筛选方案；候选方案必须在完整事件数下重新训练验证。
+4. 选择比赛模型时，使用 `test2.py` 的最终 `Score`，不要只按训练 loss 或 IoU 选择。
+5. 不要将 1 epoch 烟雾测试结果视为最终模型性能。
+
+---
 
 ## 引用与致谢
 
@@ -275,4 +397,4 @@ python test.py --config configs/evisseg_evuav_4gb.yaml
 }
 ```
 
-原始实现基于 [HAIS](https://github.com/hustvl/HAIS) 和 [spconv](https://github.com/traveller59/spconv)。使用本仓库时，请同时遵守原项目、数据集、预训练权重、HAIS 与 spconv 的许可证和使用条款。
+原始实现基于 [HAIS](https://github.com/hustvl/HAIS) 和 [spconv](https://github.com/traveller59/spconv)。使用本仓库时，请同时遵守原项目、数据集、预训练权重、HAIS 和 spconv 的许可证与使用条款。

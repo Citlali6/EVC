@@ -15,6 +15,7 @@ env/
 
 # Dataset, checkpoints, generated results, and experiment tracking
 dataset/EV-UAV-dataset/
+dataset/训练集、验证集/
 log/
 mlruns/
 

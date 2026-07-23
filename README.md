@@ -17,7 +17,7 @@ EVSOD 是一个用于复现、评估和改进 **EV-SpSegNet** 的研究仓库，
 | 在 4GB 显存设置下训练 | `train.py` + `evisseg_evuav_4gb.yaml` | 否 |
 | 从头训练完整基线 | `train.py` + `evisseg_evuav_scratch.yaml` | 否 |
 | 在赛道二验证集上计算指标和总分 | `test2.py` + `evisseg_evuav_challenge2.yaml` | 否 |
-| 生成赛道二提交文件 | 官方 `val_Challenge2.py` | 是，生成 `val-pred-txt/*.txt` |
+| 生成赛道二提交文件 | `submit_challenge2.py` + `evisseg_evuav_challenge2.yaml` | 是，生成 `val-pred-txt/*.txt` |
 
 ---
 
@@ -40,6 +40,7 @@ EVSOD/
 |-- train.py                             # 训练入口
 |-- test.py                              # 原始测试集评估入口
 |-- test2.py                             # 赛道二验证集评分入口
+|-- submit_challenge2.py                 # 赛道二提交文本生成入口
 `-- log/                                 # 本地权重、预测和实验结果，不提交到 Git
 ```
 
@@ -266,7 +267,7 @@ python test.py --config configs/evisseg_evuav_scratch.yaml
 | --- | --- | --- | --- |
 | `test.py` | `test/` | 原始项目的测试集评估 | IoU、seg_acc、Pd、Fa |
 | `test2.py` | 赛道二数据包中的 `val/` | 本地验证模型并计算赛道二总分 | IoU、Acc、Pd、Fa、Score_Fa、Score |
-| `val_Challenge2.py` | 赛道二数据包中的 `val/` | 生成比赛提交格式 | 每个视频一个 `val_xxx.txt` |
+| `submit_challenge2.py` | 赛道二数据包中的 `val/` | 按官方格式生成比赛提交文件 | 每个视频一个 `val_xxx.txt` |
 
 `test2.py` 不训练模型、不读取 `test/`、也不写提交文本。它加载 YAML 的 `TEST.model_path`，对验证集推理并使用真实标注计算本地指标。
 
@@ -282,11 +283,12 @@ python test.py --config configs/evisseg_evuav_scratch.yaml
 | 文件 | 项目 | 需要改成什么 | 是否每次实验都需要改 |
 | --- | --- | --- | --- |
 | `configs/evisseg_evuav_challenge2.yaml` | `DATA.root` | 赛道二数据包的父目录，例如 `/mnt/d/AI/ESOD/EV-UAV-main/dataset/训练集、验证集`。该目录下必须有 `val/`。 | 仅路径变化时修改。 |
-| `configs/evisseg_evuav_challenge2.yaml` | `TEST.model_path` | 当前要评估的 `best_iou_seed37.pt` 的绝对 WSL 路径。 | 每次更换模型权重时修改。 |
+| `configs/evisseg_evuav_challenge2.yaml` | `TEST.model_path` | 当前要评估或提交的 `best_iou_seed37.pt` 的绝对 WSL 路径。`test2.py` 和 `submit_challenge2.py` 都读取此项。 | 每次更换模型权重时修改。 |
 | `configs/evisseg_evuav_challenge2.yaml` | `TEST.eval`、`TEST.roc` | 必须保持为 `True`，否则无法计算全部四项指标和总分。 | 不要修改。 |
 | `configs/evisseg_evuav_challenge2.yaml` | `TEST.pd_detT`、`TEST.correct_thresh` | 保持比赛/基线评估使用的 `50` 与 `0.0001`。 | 不要为了提高本地分数而随意修改。 |
-| `test2.py` | `PREDICTION_THRESHOLD` | 保持 `0.9`，与官方 `val_Challenge2.py` 一致。 | 不要修改，除非比赛官方明确更改规则。 |
-| `test2.py` | 其他代码 | 无需修改。权重、数据目录均从 YAML 读取。 | 不需要修改。 |
+| `configs/evisseg_evuav_challenge2.yaml` | `TEST.prediction_threshold` | 保持 `0.9`，`test2.py` 与 `submit_challenge2.py` 都读取此项。 | 不要修改，除非比赛官方明确更改规则。 |
+| `configs/evisseg_evuav_challenge2.yaml` | `TEST.challenge_output_dir` | 运行 `submit_challenge2.py` 后保存 `val_xxx.txt` 的目录。 | 只在需要更改提交文件位置时修改。 |
+| `test2.py`、`submit_challenge2.py` | 权重、阈值和输出路径 | 无需修改，统一从 YAML 读取。 | 不需要修改。 |
 
 `TRAIN` 段的 `epochs`、`lr`、`max_events_num` 在 `test2.py` 推理时不会重新训练模型；它们保留在 YAML 中是为了记录该权重对应的训练设置。
 
@@ -329,20 +331,14 @@ Score    = 0.4 x Pd + 0.3 x Score_Fa + 0.2 x IoU + 0.1 x Acc
 
 ### 生成赛道二提交文本
 
-官方 `val_Challenge2.py` 位于赛道二数据包中，用于在训练完成后加载权重并生成提交文件。它不会训练模型。
+`submit_challenge2.py` 按官方 `val_Challenge2.py` 的输出格式生成提交文件。它不会训练模型，并且已纳入仓库，不依赖数据包内被忽略的脚本。
 
-先在脚本顶部设置：
-
-```python
-MODEL_PATH = Path("/mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37/best_iou_seed37.pt")
-OUTPUT_DIR = Path("/mnt/d/AI/ESOD/EV-UAV-main/log/challenge2/val-pred-txt")
-```
+先在 `configs/evisseg_evuav_challenge2.yaml` 中确认 `TEST.model_path`、`TEST.prediction_threshold` 和 `TEST.challenge_output_dir`。不需要修改 Python 脚本顶部的路径。
 
 然后运行：
 
 ```bash
-PYTHONPATH=$PROJECT_DIR:$PYTHONPATH python "dataset/训练集、验证集/val_Challenge2.py" \
-  --config configs/evisseg_evuav_challenge2.yaml
+python submit_challenge2.py --config configs/evisseg_evuav_challenge2.yaml
 ```
 
 提交目录为：
@@ -352,7 +348,7 @@ log/challenge2/val-pred-txt/
 `-- val_xxx.txt
 ```
 
-不要将 `test2.py` 的本地验证总分与 `val_Challenge2.py` 混淆：前者用于评估，后者用于导出提交文本。
+不要将 `test2.py` 的本地验证总分与 `submit_challenge2.py` 混淆：前者用于评估，后者用于导出提交文本。
 
 ---
 

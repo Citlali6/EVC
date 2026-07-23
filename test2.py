@@ -1,8 +1,8 @@
 """Evaluate a checkpoint on the Challenge 2 validation split.
 
 Unlike ``test.py``, this script reads ``val/`` rather than ``test/`` and
-does not write prediction text files.  It uses the same 0.9 threshold and
-the same IoU, Acc, Pd, and Fa definitions as the provided Challenge 2
+does not write prediction text files. It uses the configured prediction
+threshold and the same IoU, Acc, Pd, and Fa definitions as the Challenge 2
 submission script and the project's evaluator.
 """
 
@@ -18,7 +18,7 @@ from model.evspsegnet import evspsegnet
 from utils.eval import evalute
 
 
-PREDICTION_THRESHOLD = 0.9
+PREDICTION_THRESHOLD = float(cfg.prediction_threshold)
 SCORE_FA_SCALE = 10000.0
 
 

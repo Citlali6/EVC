@@ -31,3 +31,5 @@ TEST:
   save: False
   # model_path: /mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37/best_iou_seed37.pt
   model_path: /mnt/d/AI/ESOD/best_iou_seed37.pt
+  prediction_threshold: 0.9
+  challenge_output_dir: /mnt/d/AI/ESOD/EV-UAV-main/log/challenge2/val-pred-txt

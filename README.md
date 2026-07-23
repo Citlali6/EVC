@@ -246,6 +246,24 @@ python train.py --config configs/evisseg_evuav_4gb.yaml
 python test.py --config configs/evisseg_evuav_4gb.yaml
 ```
 
+每次执行 `train.py` 都会自动新建一个独立运行目录，不覆盖旧训练结果：
+
+```text
+log/baseline_4gb_seed37/runs/
+`-- 20260723-143000_seed37_pid1234/
+    |-- config.yaml
+    |-- best_loss_seed37.pt
+    |-- best_iou_seed37.pt       # 仅在第 40 个 epoch 后产生
+    |-- last_seed37.pt
+    `-- run_summary.json
+```
+
+训练结束时终端会打印三个权重路径。常规 50 epoch 训练优先使用 `best_iou_seed37.pt`；1 epoch 烟雾测试使用 `best_loss_seed37.pt`。评估或提交前，将对应绝对 WSL 路径填入所用 YAML 的 `TEST.model_path`，例如：
+
+```yaml
+model_path: /mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37/runs/20260723-143000_seed37_pid1234/best_iou_seed37.pt
+```
+
 该配置在训练时最多随机采样 `100000` 个事件。降低 `max_events_num` 会改变训练点云密度和目标轨迹完整性，因而会影响 `IoU`、`Acc`、`Pd`、`Fa` 和比赛得分。它适合小显存开发和方案筛选，但不能与完整事件数基线直接等价比较。
 
 ### 从头训练完整基线

@@ -19,6 +19,18 @@ dataset/训练集、验证集/
 log/
 mlruns/
 
+# Large local artifacts (keep source code and configuration in Git)
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.zip
+*.tar
+*.tar.gz
+runs/
+checkpoints/
+
 # Native extension build outputs
 lib/hais_ops/build/
 lib/hais_ops/*.egg-info/

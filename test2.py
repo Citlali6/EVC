@@ -6,65 +6,26 @@ threshold and the same IoU, Acc, Pd, and Fa definitions as the Challenge 2
 submission script and the project's evaluator.
 """
 
-import math
-from pathlib import Path
-
 import torch
 import tqdm
 
 from configs.configs import cfg
 from dataset.ev_uav import EvUAV
 from model.evspsegnet import evspsegnet
+from utils.challenge_eval import add_batch_to_evaluator, evaluate_challenge_metrics
+from utils.density_threshold import DensityAdaptiveThresholdConfig
+from utils.ensemble import ChallengePredictor
 from utils.eval import evalute
+from utils.inference_chunks import (
+    InferenceChunkConfig,
+    evaluation_batch_from_sample,
+)
+from utils.postprocess import ChallengePostprocessor
+from utils.spatial_tta import HorizontalFlipTTAConfig
+from utils.tta_inference import predict_sample_scores
 
 
 PREDICTION_THRESHOLD = float(cfg.prediction_threshold)
-SCORE_FA_SCALE = 10000.0
-
-
-def add_batch_to_evaluator(evaluator, batch, predictions, sample_number):
-    """Add every video in a collated batch as an independent evaluation item."""
-    labels = batch["seg_label"].float()
-    locations = batch["locs"]
-    target_ids = batch["idx_label"]
-    batch_ids = locations[:, 0].long()
-
-    if not (predictions.numel() == labels.numel() == locations.shape[0]):
-        raise RuntimeError(
-            "Prediction, label, and event-location counts do not match: "
-            f"{predictions.numel()}, {labels.numel()}, {locations.shape[0]}"
-        )
-
-    for local_index in batch_ids.unique(sorted=True).tolist():
-        sample_mask = batch_ids == local_index
-        sample_mask_np = sample_mask.numpy()
-        sample_predictions = predictions[sample_mask]
-        sample_labels = labels[sample_mask]
-        sample_locations = locations[sample_mask]
-        sample_target_ids = target_ids[sample_mask_np]
-
-        evaluator.matches[str(sample_number)] = {
-            "seg_pred": sample_predictions,
-            "seg_gt": sample_labels,
-        }
-        evaluator.roc_update(
-            sample_locations[:, 3],
-            sample_predictions.clone(),
-            sample_target_ids,
-            sample_labels,
-            sample_locations,
-            thresh=PREDICTION_THRESHOLD,
-        )
-        sample_number += 1
-
-    return sample_number
-
-
-def challenge_score(iou, acc, pd, fa):
-    """Compute Score = 0.4 Pd + 0.3 Score_Fa + 0.2 IoU + 0.1 Acc."""
-    score_fa = math.exp(-SCORE_FA_SCALE * fa)
-    score = 0.4 * pd + 0.3 * score_fa + 0.2 * iou + 0.1 * acc
-    return score_fa, score
 
 
 if __name__ == "__main__":
@@ -73,14 +34,23 @@ if __name__ == "__main__":
     if not cfg.eval or not cfg.roc:
         raise ValueError("Set TEST.eval: True and TEST.roc: True in the config.")
 
-    model_path = Path(cfg.model_path)
-    if not model_path.is_file():
-        raise FileNotFoundError(f"Model weight not found: {model_path}")
-
     device = torch.device("cuda:0")
-    net = evspsegnet(cfg).eval().to(device)
-    net.load_state_dict(torch.load(model_path, map_location=device))
-    print("dict load:", model_path)
+    predictor = ChallengePredictor(cfg, device, evspsegnet)
+    threshold_policy = DensityAdaptiveThresholdConfig.from_cfg(cfg)
+    chunk_config = InferenceChunkConfig.from_cfg(cfg)
+    tta_config = HorizontalFlipTTAConfig.from_cfg(cfg)
+    if threshold_policy.enabled and cfg.batch_size != 1:
+        raise ValueError("P6 density-adaptive threshold requires batch_size=1.")
+    if chunk_config.enabled and cfg.batch_size != 1:
+        raise ValueError("P8 random chunk inference requires batch_size=1.")
+    if chunk_config.enabled and getattr(cfg, "p3_lite_enabled", False):
+        raise ValueError("P8 random chunk inference does not support P3-Lite event frames.")
+    if tta_config.enabled and cfg.batch_size != 1:
+        raise ValueError("P14 horizontal-flip TTA requires batch_size=1.")
+    if tta_config.enabled and getattr(cfg, "p3_lite_enabled", False):
+        raise ValueError("P14 horizontal-flip TTA does not support P3-Lite event frames.")
+    print("dict load:", predictor.primary_model_path)
+    print("model ensemble:", predictor.describe())
 
     dataset = EvUAV(cfg, mode="val")
     dataset.file_list = sorted(dataset.file_list)
@@ -89,17 +59,28 @@ if __name__ == "__main__":
     print("validation root:", dataset.root)
     print("validation videos:", len(dataset.file_list))
     print("prediction threshold:", PREDICTION_THRESHOLD)
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
-        collate_fn=dataset.custom_collate,
-        shuffle=False,
-    )
-
+    print("threshold policy:", threshold_policy.describe(PREDICTION_THRESHOLD))
+    print("P8 random chunk inference:", chunk_config.describe())
+    print("P14 horizontal-flip TTA:", tta_config.describe())
+    postprocessor = ChallengePostprocessor.from_cfg(cfg, PREDICTION_THRESHOLD)
+    postprocess_stats = postprocessor.new_stats()
+    threshold_usage = {}
+    print("postprocessor:", postprocessor.describe())
     evaluator = evalute(cfg)
     sample_number = 0
+    p8_partitioned_videos = 0
+    p8_chunk_count = 0
+    dataloader = None
+    sample_level_inference = chunk_config.enabled or tta_config.enabled
+    if not sample_level_inference:
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=cfg.batch_size,
+            collate_fn=dataset.custom_collate,
+            shuffle=False,
+        )
     pbar = tqdm.tqdm(
-        total=len(dataloader),
+        total=len(dataset) if sample_level_inference else len(dataloader),
         desc="video",
         unit="video",
         unit_scale=True,
@@ -107,33 +88,106 @@ if __name__ == "__main__":
         leave=True,
     )
 
-    for batch in dataloader:
-        with torch.no_grad():
-            p2v_map = batch["p2v_map"].long().to(device)
-            predictions, _ = net(batch["voxel_ev"])
-            predictions = predictions[p2v_map].reshape(-1).cpu()
-            sample_number = add_batch_to_evaluator(
-                evaluator, batch, predictions, sample_number
+    if sample_level_inference:
+        for video_index in range(len(dataset)):
+            sample = dataset[video_index]
+            event_count = len(sample["ev_loc"])
+            batch = evaluation_batch_from_sample(sample)
+            predictions, chunk_count = predict_sample_scores(
+                predictor,
+                dataset,
+                sample,
+                device,
+                chunk_config,
+                tta_config,
             )
-        pbar.update(1)
+            if chunk_config.should_partition(event_count):
+                p8_partitioned_videos += 1
+                p8_chunk_count += chunk_count
+            batch_threshold = threshold_policy.threshold_for_event_count(
+                event_count,
+                PREDICTION_THRESHOLD,
+            )
+            batch_postprocessor = (
+                ChallengePostprocessor.from_cfg(cfg, batch_threshold)
+                if threshold_policy.enabled else postprocessor
+            )
+            predictions, batch_postprocess_stats = batch_postprocessor.apply(
+                predictions,
+                batch["locs"],
+            )
+            postprocess_stats.merge(batch_postprocess_stats)
+            if threshold_policy.enabled:
+                predictions = (predictions >= batch_threshold).to(predictions.dtype)
+            threshold_usage[batch_threshold] = threshold_usage.get(batch_threshold, 0) + 1
+            sample_number = add_batch_to_evaluator(
+                evaluator,
+                batch,
+                predictions,
+                sample_number,
+                batch_threshold,
+            )
+            pbar.update(1)
+    else:
+        for batch in dataloader:
+            with torch.no_grad():
+                p2v_map = batch["p2v_map"].long().to(device)
+                predictions = predictor.predict_event_scores(
+                    batch["voxel_ev"],
+                    p2v_map,
+                    event_frame=batch.get("event_frame"),
+                )
+                batch_threshold = threshold_policy.threshold_for_event_count(
+                    predictions.numel(),
+                    PREDICTION_THRESHOLD,
+                )
+                batch_postprocessor = (
+                    ChallengePostprocessor.from_cfg(cfg, batch_threshold)
+                    if threshold_policy.enabled else postprocessor
+                )
+                predictions, batch_postprocess_stats = batch_postprocessor.apply(
+                    predictions,
+                    batch["locs"],
+                )
+                postprocess_stats.merge(batch_postprocess_stats)
+                if threshold_policy.enabled:
+                    # Semantic metrics are computed after the loop with one scalar
+                    # threshold, so persist the selected per-video decision here.
+                    predictions = (predictions >= batch_threshold).to(predictions.dtype)
+                threshold_usage[batch_threshold] = threshold_usage.get(batch_threshold, 0) + 1
+                sample_number = add_batch_to_evaluator(
+                    evaluator,
+                    batch,
+                    predictions,
+                    sample_number,
+                    batch_threshold,
+                )
+            pbar.update(1)
 
     pbar.close()
+    print("postprocess result:", postprocess_stats.summary())
+    if chunk_config.enabled:
+        print(
+            "P8 random chunk result: {} high-density videos, {} chunk forwards".format(
+                p8_partitioned_videos,
+                p8_chunk_count,
+            )
+        )
+    if threshold_policy.enabled:
+        print(
+            "P6 threshold usage:",
+            ", ".join(
+                "{:.3f}: {} videos".format(threshold, count)
+                for threshold, count in sorted(threshold_usage.items())
+            ),
+        )
 
-    iou = float(evaluator.evaluate_semantic_segmantation_miou().item())
-    acc = float(evaluator.evaluate_semantic_segmantation_accuracy().item())
-    pd, fa = evaluator.cal_roc()
-    pd = float(pd)
-    fa = float(fa)
-
-    if not all(math.isfinite(value) for value in (iou, acc, pd, fa)):
-        raise RuntimeError("A non-finite metric was produced; check the validation data.")
-
-    score_fa, score = challenge_score(iou, acc, pd, fa)
+    metrics = evaluate_challenge_metrics(evaluator, PREDICTION_THRESHOLD)
 
     print("\nChallenge 2 validation metrics")
-    print(f"IoU:      {iou:.10f}")
-    print(f"Acc:      {acc:.10f}")
-    print(f"Pd:       {pd:.10f}")
-    print(f"Fa:       {fa:.10e}")
-    print(f"Score_Fa: {score_fa:.10f}")
-    print(f"Score:    {score:.10f}")
+    print(f"IoU:      {metrics.iou:.10f}")
+    print(f"Acc:      {metrics.acc:.10f}")
+    print(f"Pd:       {metrics.pd:.10f}")
+    print(f"Fa:       {metrics.fa:.10e}")
+    print(f"Score_Fa: {metrics.score_fa:.10f}")
+    print(f"Score:    {metrics.score:.10f}")

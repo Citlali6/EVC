@@ -4,6 +4,10 @@ STRUCTURE:
   block_residual: True
   block_reps: 2
   use_coords: True
+  # P2b: disabled by default; enable with --set STRUCTURE.p2b_density_gdsca_enabled=true
+  p2b_density_gdsca_enabled: false
+  # P16: enable true global token attention after sparse patch pooling.
+  p16_global_patch_attention_enabled: false
 
 DATA:
   input_channel: 4
@@ -13,15 +17,81 @@ DATA:
   res: [346,260]
 
 TRAIN:
+  seed: 37
   epochs: 50
   batch_size: 1
   train_workers: 8
   optim: Adam # Adam or SGD
   lr: 0.001
+  # Default preserves the original StepLR(10, 0.1) behavior.
+  scheduler: step
+  scheduler_step_size: 10
+  scheduler_gamma: 0.1
+  scheduler_min_lr: 0.000001
+  # Optional cosine horizon. Null keeps T_max equal to TRAIN.epochs.
+  scheduler_t_max: null
+  validation_start_epoch: 40
+  # Save every N epochs when nonzero; useful when external validation differs.
+  checkpoint_interval: 0
   k: 3
   t: 5
   max_events_num : 700000
   model_save_root: /mnt/d/AI/ESOD/EV-UAV-main/log/model
+  # Optional model-only initialization for a later fine-tuning stage.
+  init_model_path: ""
+  # P2b uses a faster learning rate only for its newly introduced density gates.
+  p2b_gate_lr_multiplier: 1.0
+  # P11 uses a faster learning rate for its zero-initialized activity branch.
+  p11_feature_lr_multiplier: 1.0
+  # P12 uses a faster learning rate for its zero-initialized density branch.
+  p12_feature_lr_multiplier: 1.0
+
+SAMPLING:
+  # P1b: disabled by default; enable with --set SAMPLING.target_preserving_enabled=true
+  target_preserving_enabled: false
+  # P9: add a uniform complement for each oversized P1b training video.
+  density_dual_view_enabled: false
+  density_dual_view_event_count_cutoff: 100000
+  # P10: repeat only oversized target-preserving videos during training.
+  dense_target_oversampling_enabled: false
+  dense_target_oversampling_event_count_cutoff: 100000
+  dense_target_oversampling_factor: 2
+  # P5: train oversized videos as contiguous temporal chunks instead of random subsamples.
+  temporal_chunk_enabled: false
+  # P15: training-only label-preserving horizontal flip augmentation.
+  p15_horizontal_flip_augmentation_enabled: false
+  p15_horizontal_flip_augmentation_probability: 0.5
+
+LOSS:
+  # P1: disabled by default; enable with --set LOSS.p1_hard_negative_enabled=true
+  p1_hard_negative_enabled: false
+  p1_hard_negative_weight: 0.02
+  p1_hard_negative_ratio: 0.01
+  p1_hard_negative_warmup_epochs: 10
+  # P2a: disabled by default; enable with --set LOSS.p2_positive_stc_floor_enabled=true
+  p2_positive_stc_floor_enabled: false
+  p2_positive_stc_floor: 0.35
+  # P4: target-frame detection loss aligned with the official Pd rule.
+  p4_target_frame_enabled: false
+  p4_target_frame_weight: 0.05
+  p4_target_frame_warmup_epochs: 10
+  # P13: lift target-frame recall while constraining false-alarm components.
+  p13_component_hard_negative_enabled: false
+  p13_component_hard_negative_weight: 0.005
+  p13_target_frame_weight: 0.01
+  p13_component_hard_negative_ratio: 0.01
+  p13_component_hard_negative_warmup_epochs: 10
+  p13_spatial_cell_size: 3
+  p13_temporal_bin_size: 50
+  p13_min_cell_events: 2
+  p13_activation_threshold: 0.45
+  p13_activation_temperature: 0.10
+  # P17: rank low-confidence positives above high-confidence backgrounds.
+  p17_positive_ranking_enabled: false
+  p17_positive_ranking_weight: 0.02
+  p17_positive_ranking_ratio: 0.01
+  p17_positive_ranking_margin: 0.05
+  p17_positive_ranking_warmup_epochs: 10
 
 TEST:
   vis: False
@@ -31,4 +101,45 @@ TEST:
   correct_thresh: 0.0001
   save: True
   model_path: /mnt/d/AI/ESOD/EV-UAV-main/log/model/best_iou_seed37.pt
+  prediction_threshold: 0.9
 
+POSTPROCESS:
+  # P0: disabled by default; enable with --set POSTPROCESS.p0_enabled=true
+  p0_enabled: false
+  p0_spatial_radius: 1
+  p0_temporal_bin_size: 50
+  p0_temporal_radius_bins: 1
+  p0_min_cluster_events: 2
+  p0_min_duration_bins: 1
+  # P0c: retain only very high-confidence clusters that P0 would remove.
+  p0c_high_confidence_recovery_enabled: false
+  p0c_retain_min_score: 0.98
+  # P0b: centroid-track alternative to P0; P0 and P0b are mutually exclusive.
+  p0b_enabled: false
+  p0b_spatial_radius: 1
+  p0b_temporal_bin_size: 50
+  p0b_max_link_distance: 5.0
+  p0b_max_gap_bins: 1
+  p0b_min_track_events: 3
+  p0b_min_track_frames: 1
+  # P6: density-adaptive decision threshold; disabled by default.
+  p6_density_threshold_enabled: false
+  p6_event_count_cutoff: 100000
+  p6_low_density_threshold: 0.70
+  p6_high_density_threshold: 0.92
+
+FUSION:
+  # P3-Lite: disabled by default; enable with --set FUSION.p3_lite_enabled=true
+  p3_lite_enabled: false
+  p3_lite_temporal_bins: 4
+  p3_lite_width: 8
+
+FEATURES:
+  # P11: label-free same-pixel temporal activity feature; disabled by default.
+  p11_local_activity_enabled: false
+  p11_local_activity_radius: 50
+  # P12: complete-stream local 3D density feature; disabled by default.
+  p12_local_density_enabled: false
+  p12_spatial_cell_size: 3
+  p12_temporal_cell_size: 50
+  p12_neighborhood_radius: 1

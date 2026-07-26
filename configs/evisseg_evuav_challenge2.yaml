@@ -4,6 +4,10 @@ STRUCTURE:
   block_residual: True
   block_reps: 2
   use_coords: True
+  # P2b: disabled by default; enable with --set STRUCTURE.p2b_density_gdsca_enabled=true
+  p2b_density_gdsca_enabled: false
+  # P16: enable true global token attention after sparse patch pooling.
+  p16_global_patch_attention_enabled: false
 
 DATA:
   input_channel: 4
@@ -12,15 +16,82 @@ DATA:
   res: [346,260]
 
 TRAIN:
+  # Kept for config consistency; test2.py does not use a training seed.
+  seed: 37
   epochs: 50
   batch_size: 1
   train_workers: 8
   optim: Adam
   lr: 0.001
+  # Kept for config consistency; test2.py does not construct an optimizer.
+  scheduler: step
+  scheduler_step_size: 10
+  scheduler_gamma: 0.1
+  scheduler_min_lr: 0.000001
+  # Optional cosine horizon. Null keeps T_max equal to TRAIN.epochs.
+  scheduler_t_max: null
+  validation_start_epoch: 40
+  # Kept for config consistency; test2.py does not save training checkpoints.
+  checkpoint_interval: 0
   k: 3
   t: 5
   max_events_num: 100000
   model_save_root: /mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37
+  # Kept for config consistency; test2.py does not initialize training weights.
+  init_model_path: ""
+  # Kept for config consistency; test2.py does not construct an optimizer.
+  p2b_gate_lr_multiplier: 1.0
+  # Kept for config consistency; test2.py does not construct an optimizer.
+  p11_feature_lr_multiplier: 1.0
+  # Kept for config consistency; test2.py does not construct an optimizer.
+  p12_feature_lr_multiplier: 1.0
+
+SAMPLING:
+  # Training-only; validation and submission never apply label-aware sampling.
+  target_preserving_enabled: false
+  # P9: training-only density-aware dual view; disabled for validation/export.
+  density_dual_view_enabled: false
+  density_dual_view_event_count_cutoff: 100000
+  # P10: training-only dense target-preserving oversampling; inference ignores it.
+  dense_target_oversampling_enabled: false
+  dense_target_oversampling_event_count_cutoff: 100000
+  dense_target_oversampling_factor: 2
+  # Training-only; kept for config consistency with train.py.
+  temporal_chunk_enabled: false
+  # P15: training-only label-preserving horizontal flip augmentation.
+  p15_horizontal_flip_augmentation_enabled: false
+  p15_horizontal_flip_augmentation_probability: 0.5
+
+LOSS:
+  # P1 is a training-only loss and remains disabled during validation/export.
+  p1_hard_negative_enabled: false
+  p1_hard_negative_weight: 0.02
+  p1_hard_negative_ratio: 0.01
+  p1_hard_negative_warmup_epochs: 10
+  # P2a: disabled by default; training-only, kept here so --set keys are consistent.
+  p2_positive_stc_floor_enabled: false
+  p2_positive_stc_floor: 0.35
+  # P4: training-only, kept here so --set keys are consistent.
+  p4_target_frame_enabled: false
+  p4_target_frame_weight: 0.05
+  p4_target_frame_warmup_epochs: 10
+  # P13: training-only, kept here so --set keys are consistent.
+  p13_component_hard_negative_enabled: false
+  p13_component_hard_negative_weight: 0.005
+  p13_target_frame_weight: 0.01
+  p13_component_hard_negative_ratio: 0.01
+  p13_component_hard_negative_warmup_epochs: 10
+  p13_spatial_cell_size: 3
+  p13_temporal_bin_size: 50
+  p13_min_cell_events: 2
+  p13_activation_threshold: 0.45
+  p13_activation_temperature: 0.10
+  # P17: training-only confidence ranking; disabled for default evaluation.
+  p17_positive_ranking_enabled: false
+  p17_positive_ranking_weight: 0.02
+  p17_positive_ranking_ratio: 0.01
+  p17_positive_ranking_margin: 0.05
+  p17_positive_ranking_warmup_epochs: 10
 
 TEST:
   vis: False
@@ -29,7 +100,98 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: False
-  # model_path: /mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37/best_iou_seed37.pt
-  model_path: /mnt/d/AI/ESOD/best_iou_seed37.pt
+  model_path: /mnt/d/AI/ESOD/EV-UAV-main/log/baseline_4gb_seed37/best_iou_seed37.pt
+  # model_path: /mnt/d/AI/ESOD/best_iou_seed37.pt
   prediction_threshold: 0.9
   challenge_output_dir: /mnt/d/AI/ESOD/EV-UAV-main/log/challenge2/val-pred-txt
+
+POSTPROCESS:
+  # P0: disabled by default; enable with --set POSTPROCESS.p0_enabled=true
+  p0_enabled: false
+  p0_spatial_radius: 1
+  p0_temporal_bin_size: 50
+  p0_temporal_radius_bins: 1
+  p0_min_cluster_events: 2
+  p0_min_duration_bins: 1
+  # P0c: retain only very high-confidence clusters that P0 would remove.
+  p0c_high_confidence_recovery_enabled: false
+  p0c_retain_min_score: 0.98
+  # P0b: centroid-track alternative to P0; P0 and P0b are mutually exclusive.
+  p0b_enabled: false
+  p0b_spatial_radius: 1
+  p0b_temporal_bin_size: 50
+  p0b_max_link_distance: 5.0
+  p0b_max_gap_bins: 1
+  p0b_min_track_events: 3
+  p0b_min_track_frames: 1
+  # P6: density-adaptive decision threshold; disabled by default.
+  p6_density_threshold_enabled: false
+  p6_event_count_cutoff: 100000
+  p6_low_density_threshold: 0.70
+  p6_high_density_threshold: 0.92
+
+FUSION:
+  # P3-Lite: disabled by default; enable with --set FUSION.p3_lite_enabled=true
+  p3_lite_enabled: false
+  p3_lite_temporal_bins: 4
+  p3_lite_width: 8
+
+FEATURES:
+  # P11: label-free same-pixel temporal activity feature; disabled by default.
+  p11_local_activity_enabled: false
+  p11_local_activity_radius: 50
+  # P12: complete-stream local 3D density feature; disabled by default.
+  p12_local_density_enabled: false
+  p12_spatial_cell_size: 3
+  p12_temporal_cell_size: 50
+  p12_neighborhood_radius: 1
+
+ENSEMBLE:
+  # E1: disabled by default; TEST.model_path remains the primary checkpoint.
+  ensemble_enabled: false
+  ensemble_secondary_model_path: ""
+  ensemble_primary_weight: 0.85
+
+INFERENCE_CHUNK:
+  # P8: label-free random partitions for videos beyond the training event budget.
+  # Disabled by default; enable with --set INFERENCE_CHUNK.p8_enabled=true.
+  p8_enabled: false
+  p8_event_count_cutoff: 100000
+  p8_chunk_size: 100000
+  p8_random_seeds: [37]
+
+INFERENCE_TTA:
+  # P14: label-free horizontal-flip score averaging before P6 and P0.
+  p14_horizontal_flip_enabled: false
+  p14_horizontal_flip_original_weight: 1.0
+
+HORIZONTAL_FLIP_TTA_SWEEP:
+  # Used only by sweep_horizontal_flip_tta.py; it does not affect test2.py
+  # or submission. Values are the original-score weights before thresholding.
+  horizontal_flip_original_weights: [0.0, 0.25, 0.50, 0.75, 1.0]
+
+SWEEP:
+  # Used only by sweep_thresholds.py. The decision threshold is a submission
+  # hyperparameter because the official txt files already contain binary labels.
+  thresholds: [0.70, 0.75, 0.80, 0.82, 0.84, 0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.98]
+
+DENSITY_SWEEP:
+  # Used only by sweep_density_thresholds.py; it does not affect test2.py or submission.
+  event_count_cutoffs: [80000, 100000, 150000, 200000, 300000]
+  low_thresholds: [0.70, 0.75, 0.80]
+  high_thresholds: [0.90, 0.92, 0.94]
+
+DENSITY_ENSEMBLE_SWEEP:
+  # Used only by sweep_density_ensemble_weights.py. It does not affect test2.py,
+  # training, or submission. The static E1 weight is included automatically.
+  ensemble_event_count_cutoff: 100000
+  ensemble_low_density_primary_weights: [0.800, 0.850, 0.875, 0.895, 0.910, 0.925, 0.950, 0.975, 1.000]
+  ensemble_high_density_primary_weights: [0.500, 0.650, 0.750, 0.800, 0.850, 0.875, 0.895, 0.925, 0.950, 1.000]
+
+INFERENCE_CHUNK_SWEEP:
+  # Used only by sweep_inference_chunks.py. It does not affect test2.py,
+  # training, or submission. Candidates use no labels during inference.
+  chunk_event_count_cutoff: 100000
+  chunk_sizes: [100000]
+  chunk_strategies: [temporal, random]
+  chunk_random_seed: 37

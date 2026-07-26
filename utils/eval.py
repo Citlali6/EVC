@@ -84,10 +84,12 @@ class evalute():
         for k, v in self.matches.items():
             seg_gt_list.append(v['seg_gt'])
             seg_pred_list.append(v['seg_pred'])
-        seg_gt_all = torch.cat(seg_gt_list, dim=0).cuda()
-        seg_pred_all = torch.cat(seg_pred_list, dim=0).cuda()
-        seg_pred_all[seg_pred_all >= thresh] = 1
-        seg_pred_all[seg_pred_all < thresh] = 0
+        # Metrics do not need CUDA. Avoid PyTorch 1.9 CUDA boolean-index writes
+        # on large validation tensors, which can fail with an internal assertion.
+        seg_gt_all = torch.cat(seg_gt_list, dim=0).cpu()
+        seg_pred_all = (torch.cat(seg_pred_list, dim=0).cpu() >= thresh).to(
+            seg_gt_all.dtype
+        )
         assert seg_gt_all.shape == seg_pred_all.shape
         correct = (seg_gt_all[seg_gt_all == 1] == seg_pred_all[seg_gt_all == 1]).sum()
         whole = (seg_gt_all == 1).sum()

@@ -86,13 +86,14 @@ class BaseDataLoader(torch.utils.data.Dataset):
         feature_batches=[]
         seg_label_batches=[]
         idx_label_batches = []
+        event_frame_batches = []
 
         for i,ev in enumerate(batch):
             ev_loc = ev['ev_loc']
             loc = np.hstack((i * np.ones((ev_loc.shape[0], 1)), ev_loc))
             loc_batches.append(loc)
 
-            feature = ev['evs_norm'][:,0:4]
+            feature = ev['evs_norm']
             feature_batches.append(feature)
 
             seg_label = ev['seg_label']
@@ -101,6 +102,9 @@ class BaseDataLoader(torch.utils.data.Dataset):
 
             idx_label =ev['idx']
             idx_label_batches.append(idx_label)
+
+            if 'event_frame' in ev:
+                event_frame_batches.append(ev['event_frame'])
 
 
 
@@ -130,6 +134,11 @@ class BaseDataLoader(torch.utils.data.Dataset):
         output['p2v_map'] = p2v_map
         output['locs'] = locs_batches
         output['idx_label'] = idx_label_batches
+        if event_frame_batches:
+            if len(event_frame_batches) != batch_size:
+                raise ValueError('event_frame must be present for every sample in a batch.')
+            output['event_frame'] = torch.from_numpy(
+                np.stack(event_frame_batches, axis=0)
+            ).float().contiguous().cuda()
 
         return output
-

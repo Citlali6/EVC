@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from utils.ensemble import EnsembleConfig, weighted_average
+from utils.ensemble import DenseExpertConfig, EnsembleConfig, weighted_average
 
 
 class EnsembleTests(unittest.TestCase):
@@ -26,6 +26,21 @@ class EnsembleTests(unittest.TestCase):
     def test_invalid_weight_is_rejected(self):
         with self.assertRaises(ValueError):
             EnsembleConfig(primary_weight=1.01)
+        with self.assertRaises(ValueError):
+            DenseExpertConfig(base_weight=-0.01)
+
+    def test_dense_expert_uses_only_videos_above_the_cutoff(self):
+        config = DenseExpertConfig(
+            enabled=True,
+            model_path='dense.pt',
+            event_count_cutoff=100000,
+            base_weight=0.8,
+        )
+
+        self.assertFalse(config.should_use(100000))
+        self.assertTrue(config.should_use(100001))
+        with self.assertRaises(ValueError):
+            DenseExpertConfig(enabled=True, model_path='')
 
 
 if __name__ == "__main__":

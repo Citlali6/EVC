@@ -50,6 +50,42 @@ class EnsembleConfig:
         )
 
 
+@dataclass(frozen=True)
+class DenseExpertConfig:
+    """Optional third model used only above an observable event-count cutoff."""
+
+    enabled: bool = False
+    model_path: str = ""
+    event_count_cutoff: int = 100000
+    base_weight: float = 0.85
+
+    def __post_init__(self):
+        if self.event_count_cutoff <= 0:
+            raise ValueError(
+                "dense-expert event_count_cutoff must be positive."
+            )
+        if not 0.0 <= self.base_weight <= 1.0:
+            raise ValueError("dense-expert base_weight must be in [0, 1].")
+        if self.enabled and not self.model_path:
+            raise ValueError(
+                "ENSEMBLE.dense_expert_model_path is required when the dense expert is enabled."
+            )
+
+    @classmethod
+    def from_cfg(cls, cfg):
+        return cls(
+            enabled=_as_bool(getattr(cfg, "dense_expert_enabled", False)),
+            model_path=str(getattr(cfg, "dense_expert_model_path", "")),
+            event_count_cutoff=int(
+                getattr(cfg, "dense_expert_event_count_cutoff", 100000)
+            ),
+            base_weight=float(getattr(cfg, "dense_expert_base_weight", 0.85)),
+        )
+
+    def should_use(self, event_count):
+        return self.enabled and int(event_count) > self.event_count_cutoff
+
+
 def weighted_average(primary_scores, secondary_scores, primary_weight):
     """Return the event-wise weighted score average without thresholding."""
     if primary_scores.shape != secondary_scores.shape:
@@ -73,15 +109,26 @@ class ChallengePredictor:
         self.cfg = cfg
         self.device = device
         self.config = EnsembleConfig.from_cfg(cfg)
+        self.dense_expert_config = DenseExpertConfig.from_cfg(cfg)
         self.primary_model_path = Path(cfg.model_path)
         self.primary_net = self._load_model(self.primary_model_path, model_factory)
         self.secondary_model_path = None
         self.secondary_net = None
+        self.dense_expert_model_path = None
+        self.dense_expert_net = None
 
         if self.config.enabled:
             self.secondary_model_path = Path(self.config.secondary_model_path)
             self.secondary_net = self._load_model(
                 self.secondary_model_path,
+                model_factory,
+            )
+        if self.dense_expert_config.enabled:
+            self.dense_expert_model_path = Path(
+                self.dense_expert_config.model_path
+            )
+            self.dense_expert_net = self._load_model(
+                self.dense_expert_model_path,
                 model_factory,
             )
 
@@ -103,15 +150,27 @@ class ChallengePredictor:
 
     def describe(self):
         if not self.config.enabled:
-            return "disabled (single model)"
-        return (
-            "enabled (primary_weight={:.3f}, secondary_weight={:.3f}, "
-            "secondary_model={})"
-        ).format(
-            self.config.primary_weight,
-            1.0 - self.config.primary_weight,
-            self.secondary_model_path,
-        )
+            description = "disabled (single model)"
+        else:
+            description = (
+                "enabled (primary_weight={:.3f}, secondary_weight={:.3f}, "
+                "secondary_model={})"
+            ).format(
+                self.config.primary_weight,
+                1.0 - self.config.primary_weight,
+                self.secondary_model_path,
+            )
+        if self.dense_expert_config.enabled:
+            description += (
+                "; dense expert (event_count > {}, base_weight={:.3f}, "
+                "expert_weight={:.3f}, model={})"
+            ).format(
+                self.dense_expert_config.event_count_cutoff,
+                self.dense_expert_config.base_weight,
+                1.0 - self.dense_expert_config.base_weight,
+                self.dense_expert_model_path,
+            )
+        return description
 
     @staticmethod
     def _predict_event_scores(net, voxel_events, p2v_map, event_frame=None):
@@ -142,17 +201,47 @@ class ChallengePredictor:
         )
         return primary_scores, secondary_scores
 
-    def predict_event_scores(self, voxel_events, p2v_map, event_frame=None):
-        """Return the configured single-model or weighted ensemble scores."""
+    def predict_event_scores(
+        self,
+        voxel_events,
+        p2v_map,
+        event_frame=None,
+        source_event_count=None,
+    ):
+        """Return base scores and optionally blend a dense-scene expert.
+
+        ``source_event_count`` remains the full-video size during P8 chunked
+        inference, so the expert decision never depends on a chunk's size.
+        """
         primary_scores, secondary_scores = self.predict_event_score_pair(
             voxel_events,
             p2v_map,
             event_frame,
         )
         if secondary_scores is None:
-            return primary_scores
+            base_scores = primary_scores
+        else:
+            base_scores = weighted_average(
+                primary_scores,
+                secondary_scores,
+                self.config.primary_weight,
+            )
+        if not self.dense_expert_config.enabled:
+            return base_scores
+        if source_event_count is None:
+            raise ValueError(
+                "source_event_count is required when the dense expert is enabled."
+            )
+        if not self.dense_expert_config.should_use(source_event_count):
+            return base_scores
+        expert_scores = self._predict_event_scores(
+            self.dense_expert_net,
+            voxel_events,
+            p2v_map,
+            event_frame,
+        )
         return weighted_average(
-            primary_scores,
-            secondary_scores,
-            self.config.primary_weight,
+            base_scores,
+            expert_scores,
+            self.dense_expert_config.base_weight,
         )

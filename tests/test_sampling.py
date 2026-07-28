@@ -3,6 +3,8 @@ import unittest
 import numpy as np
 
 from dataset.sampling import (
+    dense_specialist_training_view,
+    dense_specialist_view_count,
     dense_target_oversample_repeats,
     density_dual_view_modes,
     select_training_event_indices,
@@ -104,6 +106,42 @@ class TargetPreservingSamplingTests(unittest.TestCase):
                 factor=5,
             ),
             1,
+        )
+
+    def test_dense_specialist_uses_only_oversized_views(self):
+        self.assertEqual(
+            dense_specialist_view_count(
+                100000,
+                100000,
+                dense_specialist_enabled=True,
+                views_per_video=6,
+            ),
+            0,
+        )
+        self.assertEqual(
+            dense_specialist_view_count(
+                100001,
+                100000,
+                dense_specialist_enabled=True,
+                views_per_video=6,
+            ),
+            6,
+        )
+        self.assertEqual(
+            dense_specialist_view_count(
+                250000,
+                100000,
+                dense_specialist_enabled=False,
+                views_per_video=6,
+            ),
+            0,
+        )
+
+    def test_dense_specialist_can_select_target_preserving_views(self):
+        self.assertEqual(dense_specialist_training_view(False), 'uniform')
+        self.assertEqual(
+            dense_specialist_training_view(True),
+            'target_preserving',
         )
 
 

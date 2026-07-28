@@ -5,8 +5,10 @@ import numpy as np
 from utils.postprocess import (
     P0ClusterFilterConfig,
     P0bTrackFilterConfig,
+    P18ScoreTrackRecoveryConfig,
     filter_positive_events,
     filter_positive_events_by_tracks,
+    recover_seed_supported_track_events,
 )
 
 
@@ -224,6 +226,177 @@ class P0ClusterFilterTests(unittest.TestCase):
 
         np.testing.assert_array_equal(kept_mask, positive_mask)
         self.assertFalse(stats.enabled)
+
+    def test_p18_restores_one_event_from_a_seed_supported_dense_track(self):
+        locations = np.array(
+            [
+                [0, 10, 10, 0],
+                [0, 13, 10, 50],
+                [0, 13, 11, 51],
+                [0, 80, 80, 50],
+                [0, 80, 81, 51],
+            ]
+        )
+        scores = np.array([0.95, 0.83, 0.87, 0.86, 0.82])
+        config = P18ScoreTrackRecoveryConfig(
+            enabled=True,
+            event_count_cutoff=4,
+            candidate_floor=0.80,
+            spatial_radius=1,
+            temporal_bin_size=50,
+            max_link_distance=5.0,
+            max_gap_bins=1,
+            min_track_bins=2,
+        )
+
+        recovery_mask, stats = recover_seed_supported_track_events(
+            scores,
+            locations,
+            config,
+            prediction_threshold=0.90,
+        )
+
+        np.testing.assert_array_equal(
+            recovery_mask,
+            np.array([False, False, True, False, False]),
+        )
+        self.assertEqual(stats.eligible_videos, 1)
+        self.assertEqual(stats.supported_tracks, 1)
+        self.assertEqual(stats.restored_components, 1)
+        self.assertEqual(stats.restored_events, 1)
+
+    def test_p18_component_mode_restores_all_weak_component_events(self):
+        locations = np.array(
+            [
+                [0, 10, 10, 0],
+                [0, 13, 10, 50],
+                [0, 13, 11, 51],
+                [0, 14, 10, 52],
+            ]
+        )
+        scores = np.array([0.95, 0.83, 0.87, 0.82])
+        config = P18ScoreTrackRecoveryConfig(
+            enabled=True,
+            event_count_cutoff=1,
+            candidate_floor=0.80,
+            spatial_radius=1,
+            temporal_bin_size=50,
+            max_link_distance=5.0,
+            max_gap_bins=1,
+            min_track_bins=2,
+            restore_mode='component',
+        )
+
+        recovery_mask, stats = recover_seed_supported_track_events(
+            scores,
+            locations,
+            config,
+            prediction_threshold=0.90,
+        )
+
+        np.testing.assert_array_equal(
+            recovery_mask,
+            np.array([False, True, True, True]),
+        )
+        self.assertEqual(stats.restored_components, 1)
+        self.assertEqual(stats.restored_events, 3)
+
+    def test_p18_topk_mode_restores_only_best_weak_events(self):
+        locations = np.array(
+            [
+                [0, 10, 10, 0],
+                [0, 13, 10, 50],
+                [0, 13, 11, 51],
+                [0, 14, 10, 52],
+            ]
+        )
+        scores = np.array([0.95, 0.83, 0.87, 0.82])
+        config = P18ScoreTrackRecoveryConfig(
+            enabled=True,
+            event_count_cutoff=1,
+            candidate_floor=0.80,
+            spatial_radius=1,
+            temporal_bin_size=50,
+            max_link_distance=5.0,
+            max_gap_bins=1,
+            min_track_bins=2,
+            restore_mode='topk',
+            max_restore_events_per_component=2,
+        )
+
+        recovery_mask, stats = recover_seed_supported_track_events(
+            scores,
+            locations,
+            config,
+            prediction_threshold=0.90,
+        )
+
+        np.testing.assert_array_equal(
+            recovery_mask,
+            np.array([False, True, True, False]),
+        )
+        self.assertEqual(stats.restored_events, 2)
+
+    def test_p18_does_not_recover_unseeded_or_small_videos(self):
+        locations = np.array(
+            [
+                [0, 10, 10, 0],
+                [0, 13, 10, 50],
+                [1, 20, 20, 0],
+                [1, 40, 20, 50],
+            ]
+        )
+        scores = np.array([0.85, 0.87, 0.95, 0.86])
+        config = P18ScoreTrackRecoveryConfig(
+            enabled=True,
+            event_count_cutoff=1,
+            candidate_floor=0.80,
+            spatial_radius=1,
+            temporal_bin_size=50,
+            max_link_distance=5.0,
+            max_gap_bins=1,
+            min_track_bins=2,
+        )
+
+        recovery_mask, stats = recover_seed_supported_track_events(
+            scores,
+            locations,
+            config,
+            prediction_threshold=0.90,
+        )
+
+        np.testing.assert_array_equal(recovery_mask, np.zeros(4, dtype=bool))
+        self.assertEqual(stats.eligible_videos, 2)
+        self.assertEqual(stats.restored_events, 0)
+
+    def test_p18_respects_the_event_count_cutoff(self):
+        locations = np.array(
+            [
+                [0, 10, 10, 0],
+                [0, 13, 10, 50],
+            ]
+        )
+        scores = np.array([0.95, 0.86])
+        config = P18ScoreTrackRecoveryConfig(
+            enabled=True,
+            event_count_cutoff=2,
+            candidate_floor=0.80,
+            spatial_radius=1,
+            temporal_bin_size=50,
+            max_link_distance=5.0,
+            max_gap_bins=1,
+            min_track_bins=2,
+        )
+
+        recovery_mask, stats = recover_seed_supported_track_events(
+            scores,
+            locations,
+            config,
+            prediction_threshold=0.90,
+        )
+
+        np.testing.assert_array_equal(recovery_mask, np.zeros(2, dtype=bool))
+        self.assertEqual(stats.eligible_videos, 0)
 
 
 if __name__ == '__main__':

@@ -279,6 +279,23 @@ if __name__ == '__main__':
                 dataset.dense_target_oversampling_factor,
             )
         )
+    elif dataset.dense_specialist_enabled:
+        dense_specialist_view = (
+            'target-preserving'
+            if dataset.dense_specialist_target_preserving_enabled
+            else 'uniform'
+        )
+        print(
+            'training event sampling: dense-scene specialist '
+            '({} oversized videos, {} views per epoch; cutoff={}, '
+            'views_per_video={}, sampling={})'.format(
+                dataset.dense_specialist_source_video_count,
+                dataset.dense_specialist_sample_count,
+                dataset.dense_specialist_event_count_cutoff,
+                dataset.dense_specialist_views_per_video,
+                dense_specialist_view,
+            )
+        )
     elif cfg.target_preserving_enabled:
         print('training event sampling: target-preserving')
     else:
@@ -297,6 +314,7 @@ if __name__ == '__main__':
     print('P4 target-frame detection loss:', stc_criterion.describe_p4())
     print('P13 component hard-negative loss:', stc_criterion.describe_p13())
     print('P17 positive ranking loss:', stc_criterion.describe_p17())
+    print('P22 target-frame balanced loss:', stc_criterion.describe_p22())
 
     optimizer = build_optimizer(net, cfg)
     if cfg.p2b_density_gdsca_enabled:
@@ -369,6 +387,20 @@ if __name__ == '__main__':
         'density_dual_view_extra_sample_count': (
             dataset.density_dual_view_extra_sample_count
         ),
+        'dense_specialist_enabled': dataset.dense_specialist_enabled,
+        'dense_specialist_event_count_cutoff': (
+            dataset.dense_specialist_event_count_cutoff
+        ),
+        'dense_specialist_views_per_video': (
+            dataset.dense_specialist_views_per_video
+        ),
+        'dense_specialist_target_preserving_enabled': (
+            dataset.dense_specialist_target_preserving_enabled
+        ),
+        'dense_specialist_source_video_count': (
+            dataset.dense_specialist_source_video_count
+        ),
+        'dense_specialist_sample_count': dataset.dense_specialist_sample_count,
         'config_overrides': ' '.join(cfg.config_overrides),
         'p1_hard_negative_enabled': stc_criterion.p1_hard_negative_enabled,
         'p1_hard_negative_weight': stc_criterion.p1_hard_negative_weight,
@@ -404,6 +436,16 @@ if __name__ == '__main__':
         'p17_positive_ranking_warmup_epochs': (
             stc_criterion.p17_positive_ranking_warmup_epochs
         ),
+        'p22_target_frame_balanced_enabled': (
+            stc_criterion.p22_target_frame_balanced_enabled
+        ),
+        'p22_target_frame_balanced_weight': (
+            stc_criterion.p22_target_frame_balanced_weight
+        ),
+        'p22_target_frame_balanced_warmup_epochs': (
+            stc_criterion.p22_target_frame_balanced_warmup_epochs
+        ),
+        'p22_temporal_bin_size': stc_criterion.p22_temporal_bin_size,
         'p2b_density_gdsca_enabled': cfg.p2b_density_gdsca_enabled,
         'p16_global_patch_attention_enabled': getattr(
             cfg,
@@ -503,6 +545,11 @@ if __name__ == '__main__':
                     stc_criterion.p17_positive_ranking_weight
                     * stc_criterion.last_p17_positive_ranking_loss.item()
                 )
+            if stc_criterion.p22_target_frame_balanced_active:
+                postfix['p22'] = (
+                    stc_criterion.p22_target_frame_balanced_weight
+                    * stc_criterion.last_p22_target_frame_balanced_loss.item()
+                )
             pbar.set_postfix(**postfix)
             pbar.update(1)
 
@@ -572,6 +619,15 @@ if __name__ == '__main__':
                     mlflow.log_metric(
                         'p17_background_count',
                         stc_criterion.last_p17_background_count,
+                    )
+                if stc_criterion.p22_target_frame_balanced_enabled:
+                    mlflow.log_metric(
+                        'p22_target_frame_balanced_loss',
+                        stc_criterion.last_p22_target_frame_balanced_loss.item(),
+                    )
+                    mlflow.log_metric(
+                        'p22_target_frame_count',
+                        stc_criterion.last_p22_target_frame_count,
                     )
                 if loss_value < best_loss:
                     save_checkpoint(net.state_dict(), best_loss_path)

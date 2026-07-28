@@ -151,6 +151,37 @@ def dense_target_oversample_repeats(
     return 1
 
 
+def dense_specialist_view_count(
+    event_count,
+    event_count_cutoff,
+    dense_specialist_enabled=False,
+    views_per_video=1,
+):
+    """Return uniform P8-matched views for a dense-scene specialist.
+
+    Unlike P9, this mode is intended for a separate model and exposes no
+    low-density source videos.  Each returned view is sampled uniformly, so
+    its foreground/background ratio matches a random P8 inference partition.
+    """
+    event_count = int(event_count)
+    event_count_cutoff = int(event_count_cutoff)
+    views_per_video = int(views_per_video)
+    if event_count < 0:
+        raise ValueError('event_count must be non-negative.')
+    if event_count_cutoff <= 0:
+        raise ValueError('event_count_cutoff must be positive.')
+    if views_per_video <= 0:
+        raise ValueError('views_per_video must be positive.')
+    if dense_specialist_enabled and event_count > event_count_cutoff:
+        return views_per_video
+    return 0
+
+
+def dense_specialist_training_view(target_preserving_enabled=False):
+    """Choose the label-aware sampling policy for a dense-only expert."""
+    return 'target_preserving' if target_preserving_enabled else 'uniform'
+
+
 def select_training_event_indices(
     labels,
     max_events_num,

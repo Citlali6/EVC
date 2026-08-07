@@ -8,6 +8,8 @@ from dataset.event_features import (
     build_local_spatiotemporal_density_feature,
 )
 from dataset.sampling import (
+    dense_specialist_training_view,
+    dense_specialist_view_count,
     dense_target_oversample_repeats,
     density_dual_view_modes,
     select_training_event_indices,
@@ -72,6 +74,27 @@ class EvUAV(BaseDataLoader):
         self.dense_target_oversampling_factor = int(
             getattr(self.configs, 'dense_target_oversampling_factor', 1)
         )
+        self.dense_specialist_enabled = bool(
+            mode == 'train'
+            and getattr(self.configs, 'dense_specialist_enabled', False)
+        )
+        self.dense_specialist_event_count_cutoff = int(
+            getattr(
+                self.configs,
+                'dense_specialist_event_count_cutoff',
+                self.configs.max_events_num,
+            )
+        )
+        self.dense_specialist_views_per_video = int(
+            getattr(self.configs, 'dense_specialist_views_per_video', 1)
+        )
+        self.dense_specialist_target_preserving_enabled = bool(
+            getattr(
+                self.configs,
+                'dense_specialist_target_preserving_enabled',
+                False,
+            )
+        )
         self.horizontal_flip_augmentation_enabled = bool(
             mode == 'train'
             and getattr(self.configs, 'p15_horizontal_flip_augmentation_enabled', False)
@@ -95,16 +118,20 @@ class EvUAV(BaseDataLoader):
         self.density_dual_view_extra_sample_count = 0
         self.dense_target_oversampling_source_video_count = 0
         self.dense_target_oversampling_extra_sample_count = 0
+        self.dense_specialist_source_video_count = 0
+        self.dense_specialist_sample_count = 0
         enabled_sampling_strategies = sum((
             self.temporal_chunk_enabled,
             self.density_dual_view_enabled,
             self.dense_target_oversampling_enabled,
+            self.dense_specialist_enabled,
         ))
         if enabled_sampling_strategies > 1:
             raise ValueError(
-                'temporal_chunk_enabled, density_dual_view_enabled, and '
-                'dense_target_oversampling_enabled are mutually exclusive '
-                'training strategies.'
+                'temporal_chunk_enabled, density_dual_view_enabled, '
+                'dense_target_oversampling_enabled, and '
+                'dense_specialist_enabled are mutually exclusive training '
+                'strategies.'
             )
         if self.density_dual_view_enabled:
             if not getattr(self.configs, 'target_preserving_enabled', False):
@@ -128,6 +155,20 @@ class EvUAV(BaseDataLoader):
                     'dense_target_oversampling_factor must be at least 2 '
                     'when the strategy is enabled.'
                 )
+        if self.dense_specialist_enabled:
+            if (
+                self.dense_specialist_event_count_cutoff
+                < self.configs.max_events_num
+            ):
+                raise ValueError(
+                    'dense_specialist_event_count_cutoff must be at least '
+                    'max_events_num.'
+                )
+            if self.dense_specialist_views_per_video < 1:
+                raise ValueError(
+                    'dense_specialist_views_per_video must be positive when '
+                    'the dense specialist is enabled.'
+                )
         self.sample_specs = None
         if self.temporal_chunk_enabled:
             self.sample_specs = self._build_temporal_chunk_specs()
@@ -135,6 +176,8 @@ class EvUAV(BaseDataLoader):
             self.sample_specs = self._build_density_dual_view_specs()
         elif self.dense_target_oversampling_enabled:
             self.sample_specs = self._build_dense_target_oversampling_specs()
+        elif self.dense_specialist_enabled:
+            self.sample_specs = self._build_dense_specialist_specs()
 
     def _get_p11_local_activity(self, file_name, locations):
         """Cache raw-stream activity so later epochs do not recompute it."""
@@ -223,6 +266,43 @@ class EvUAV(BaseDataLoader):
 
         self.dense_target_oversampling_source_video_count = dense_video_count
         self.dense_target_oversampling_extra_sample_count = extra_sample_count
+        return sample_specs
+
+    def _build_dense_specialist_specs(self):
+        """Use only configured views from oversized source videos.
+
+        The source event-count cutoff is the same observable used later for
+        dense-only expert inference.  Repeated views expose the specialist to
+        independent random contexts without changing the frozen base model.
+        """
+        sample_specs = []
+        dense_video_count = 0
+        training_view = dense_specialist_training_view(
+            self.dense_specialist_target_preserving_enabled
+        )
+        for file_name in self.file_list:
+            file_path = os.path.join(self.root, file_name)
+            with np.load(file_path) as events:
+                event_count = len(events['ev_loc'])
+            view_count = dense_specialist_view_count(
+                event_count,
+                self.dense_specialist_event_count_cutoff,
+                dense_specialist_enabled=True,
+                views_per_video=self.dense_specialist_views_per_video,
+            )
+            if view_count:
+                dense_video_count += 1
+                sample_specs.extend(
+                    (file_name, training_view) for _ in range(view_count)
+                )
+
+        if not sample_specs:
+            raise ValueError(
+                'dense_specialist_enabled found no training videos above its '
+                'event-count cutoff.'
+            )
+        self.dense_specialist_source_video_count = dense_video_count
+        self.dense_specialist_sample_count = len(sample_specs)
         return sample_specs
 
     def __getitem__(self, num):

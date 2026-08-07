@@ -23,10 +23,10 @@ from utils.eval import evalute
 from utils.inference_chunks import (
     InferenceChunkConfig,
     evaluation_batch_from_sample,
-    predict_full_event_scores,
-    predict_random_chunk_scores,
 )
 from utils.postprocess import ChallengePostprocessor
+from utils.spatial_tta import HorizontalFlipTTAConfig
+from utils.tta_inference import predict_sample_scores
 
 
 def parse_candidates(values, name, cast):
@@ -36,45 +36,27 @@ def parse_candidates(values, name, cast):
     return tuple(sorted({cast(value) for value in values}))
 
 
-def cache_validation_scores(predictor, dataset, device, chunk_config):
-    """Run the configured inference path once and cache CPU tensors."""
+def cache_validation_scores(predictor, dataset, device, chunk_config, tta_config):
+    """Run the same sample-level inference path as test2.py once."""
     cached_batches = []
     p8_partitioned_videos = 0
     p8_chunk_count = 0
     progress = tqdm.tqdm(total=len(dataset), desc='model inference', unit='video')
     for video_index in range(len(dataset)):
-        if chunk_config.enabled:
-            sample = dataset[video_index]
-            event_count = len(sample['ev_loc'])
-            batch = evaluation_batch_from_sample(sample)
-            if chunk_config.should_partition(event_count):
-                scores, chunk_count = predict_random_chunk_scores(
-                    predictor,
-                    dataset,
-                    sample,
-                    device,
-                    chunk_config,
-                )
-                p8_partitioned_videos += 1
-                p8_chunk_count += chunk_count
-            else:
-                scores = predict_full_event_scores(predictor, dataset, sample, device)
-        else:
-            sample = dataset[video_index]
-            sparse_batch = dataset.custom_collate([sample])
-            with torch.no_grad():
-                scores = predictor.predict_event_scores(
-                    sparse_batch['voxel_ev'],
-                    sparse_batch['p2v_map'].long().to(device),
-                    event_frame=sparse_batch.get('event_frame'),
-                ).detach().cpu().reshape(-1).clone()
-            batch = {
-                'seg_label': sparse_batch['seg_label'].detach().cpu().clone(),
-                'locs': sparse_batch['locs'].detach().cpu().clone(),
-                'idx_label': sparse_batch['idx_label'].copy(),
-            }
-            event_count = int(scores.numel())
-            del sparse_batch
+        sample = dataset[video_index]
+        event_count = len(sample['ev_loc'])
+        batch = evaluation_batch_from_sample(sample)
+        scores, chunk_count = predict_sample_scores(
+            predictor,
+            dataset,
+            sample,
+            device,
+            chunk_config,
+            tta_config,
+        )
+        if chunk_config.should_partition(event_count):
+            p8_partitioned_videos += 1
+            p8_chunk_count += chunk_count
 
         cached_batches.append({
             'file_name': dataset.file_list[video_index],
@@ -136,6 +118,23 @@ def evaluate_rule(per_video_counts, cutoff, low_threshold, high_threshold):
     return aggregate_challenge_counts(selected_counts), high_density_videos
 
 
+def thresholds_needed_for_video(
+    event_count,
+    cutoffs,
+    low_thresholds,
+    high_thresholds,
+    baseline_threshold,
+):
+    """Return only thresholds this video can use across the candidate rules."""
+    thresholds = {float(baseline_threshold)}
+    for cutoff in cutoffs:
+        if int(event_count) > cutoff:
+            thresholds.update(high_thresholds)
+        else:
+            thresholds.update(low_thresholds)
+    return tuple(sorted(thresholds))
+
+
 if __name__ == '__main__':
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA is required by this sparse-convolution model.')
@@ -162,28 +161,35 @@ if __name__ == '__main__':
     if any(value <= 0.0 or value >= 1.0 for value in low_thresholds + high_thresholds):
         raise ValueError('All density-sweep thresholds must be in (0, 1).')
 
-    thresholds = tuple(sorted(set(low_thresholds + high_thresholds + (float(cfg.prediction_threshold),))))
+    baseline_threshold = float(cfg.prediction_threshold)
     device = torch.device('cuda:0')
     predictor = ChallengePredictor(cfg, device, evspsegnet)
     chunk_config = InferenceChunkConfig.from_cfg(cfg)
+    tta_config = HorizontalFlipTTAConfig.from_cfg(cfg)
     if chunk_config.enabled and getattr(cfg, 'p3_lite_enabled', False):
         raise ValueError('P8 random chunk inference does not support P3-Lite event frames.')
+    if tta_config.enabled and getattr(cfg, 'p3_lite_enabled', False):
+        raise ValueError('P14 horizontal-flip TTA does not support P3-Lite event frames.')
+    if predictor.dense_expert_config.enabled and cfg.batch_size != 1:
+        raise ValueError('P20 dense-expert inference requires batch_size=1.')
     dataset = EvUAV(cfg, mode='val')
     dataset.file_list = sorted(dataset.file_list)
 
     print('dict load:', predictor.primary_model_path)
     print('model ensemble:', predictor.describe())
     print('P8 random chunk inference:', chunk_config.describe())
+    print('P14 horizontal-flip TTA:', tta_config.describe())
     print('event-count cutoffs:', ', '.join(str(value) for value in cutoffs))
     print('low-density thresholds:', ', '.join('{:.3f}'.format(value) for value in low_thresholds))
     print('high-density thresholds:', ', '.join('{:.3f}'.format(value) for value in high_thresholds))
-    print('cached postprocess thresholds:', ', '.join('{:.3f}'.format(value) for value in thresholds))
+    print('baseline threshold:', '{:.3f}'.format(baseline_threshold))
 
     cached_batches, p8_partitioned_videos, p8_chunk_count = cache_validation_scores(
         predictor,
         dataset,
         device,
         chunk_config,
+        tta_config,
     )
     if chunk_config.enabled:
         print(
@@ -193,12 +199,22 @@ if __name__ == '__main__':
             )
         )
     per_video_counts = []
+    thresholds_by_video = [
+        thresholds_needed_for_video(
+            cached_batch['event_count'],
+            cutoffs,
+            low_thresholds,
+            high_thresholds,
+            baseline_threshold,
+        )
+        for cached_batch in cached_batches
+    ]
     progress = tqdm.tqdm(
-        total=len(cached_batches) * len(thresholds),
+        total=sum(len(thresholds) for thresholds in thresholds_by_video),
         desc='postprocess cache',
         unit='video-threshold',
     )
-    for cached_batch in cached_batches:
+    for cached_batch, thresholds in zip(cached_batches, thresholds_by_video):
         counts_by_threshold = {}
         for threshold in thresholds:
             counts_by_threshold[threshold] = evaluate_cached_video(cached_batch, threshold)
@@ -210,7 +226,6 @@ if __name__ == '__main__':
         })
     progress.close()
 
-    baseline_threshold = float(cfg.prediction_threshold)
     baseline = aggregate_challenge_counts(
         item['counts_by_threshold'][baseline_threshold]
         for item in per_video_counts

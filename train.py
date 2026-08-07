@@ -1,5 +1,6 @@
 import json
 import os
+import argparse
 from datetime import datetime
 from pathlib import Path
 import yaml
@@ -67,6 +68,32 @@ def save_checkpoint(state_dict, checkpoint_path):
     temporary_path = checkpoint_path.with_suffix(checkpoint_path.suffix + '.tmp')
     torch.save(state_dict, temporary_path)
     os.replace(temporary_path, checkpoint_path)
+
+
+def save_full_checkpoint(model, optimizer, scheduler, epoch, best_loss, best_iou,
+                       best_score, best_score_metrics, path):
+    """Save full training state for resumption."""
+    state = {
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict(),
+        'epoch': epoch,
+        'best_loss': best_loss,
+        'best_iou': best_iou,
+        'best_score': best_score,
+        'best_score_metrics': best_score_metrics,
+    }
+    save_checkpoint(state, path)
+
+
+def load_full_checkpoint(path, model, optimizer, scheduler):
+    """Load full training state. Returns (epoch, best_loss, best_iou, best_score, best_score_metrics)."""
+    state = torch.load(path, map_location='cpu')
+    model.load_state_dict(state['model'])
+    optimizer.load_state_dict(state['optimizer'])
+    scheduler.load_state_dict(state['scheduler'])
+    return (state['epoch'], state['best_loss'], state['best_iou'],
+            state.get('best_score'), state.get('best_score_metrics'))
 
 
 def load_initial_weights(net, model_path, device):
@@ -190,10 +217,28 @@ def write_run_summary(
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--resume', type=str, default=None,
+                        help='Path to checkpoint directory to resume from')
+    args = parser.parse_known_args()[0]  # configs.py already consumed --config/--set
+
     seed = int(getattr(cfg, 'seed', 37))
     setup(seed)
     device = "cuda:0"
-    run_dir, started_at = create_run_directory(cfg, seed)
+
+    # Determine run directory: reuse existing if resuming, otherwise create new
+    if args.resume:
+        resume_dir = Path(args.resume)
+        if not resume_dir.is_dir():
+            raise NotADirectoryError('Resume directory not found: {}'.format(resume_dir))
+        run_dir = resume_dir
+        started_at = datetime.now().astimezone()
+        resume_ckpt_path = run_dir / 'last_seed{}.pt'.format(seed)
+        if not resume_ckpt_path.is_file():
+            raise FileNotFoundError('Checkpoint not found: {}'.format(resume_ckpt_path))
+        print('resuming from:', run_dir)
+    else:
+        run_dir, started_at = create_run_directory(cfg, seed)
     best_loss_path = run_dir / 'best_loss_seed{}.pt'.format(seed)
     best_iou_path = run_dir / 'best_iou_seed{}.pt'.format(seed)
     best_score_path = run_dir / 'best_score_seed{}.pt'.format(seed)
@@ -279,6 +324,23 @@ if __name__ == '__main__':
                 dataset.dense_target_oversampling_factor,
             )
         )
+    elif dataset.dense_specialist_enabled:
+        dense_specialist_view = (
+            'target-preserving'
+            if dataset.dense_specialist_target_preserving_enabled
+            else 'uniform'
+        )
+        print(
+            'training event sampling: dense-scene specialist '
+            '({} oversized videos, {} views per epoch; cutoff={}, '
+            'views_per_video={}, sampling={})'.format(
+                dataset.dense_specialist_source_video_count,
+                dataset.dense_specialist_sample_count,
+                dataset.dense_specialist_event_count_cutoff,
+                dataset.dense_specialist_views_per_video,
+                dense_specialist_view,
+            )
+        )
     elif cfg.target_preserving_enabled:
         print('training event sampling: target-preserving')
     else:
@@ -297,6 +359,7 @@ if __name__ == '__main__':
     print('P4 target-frame detection loss:', stc_criterion.describe_p4())
     print('P13 component hard-negative loss:', stc_criterion.describe_p13())
     print('P17 positive ranking loss:', stc_criterion.describe_p17())
+    print('P22 target-frame balanced loss:', stc_criterion.describe_p22())
 
     optimizer = build_optimizer(net, cfg)
     if cfg.p2b_density_gdsca_enabled:
@@ -326,10 +389,21 @@ if __name__ == '__main__':
         ),
     )
 
+    # Resume from checkpoint
+    if args.resume:
+        start_epoch, best_loss, best_iou, best_score, best_score_metrics = load_full_checkpoint(
+            resume_ckpt_path, net, optimizer, scheduler)
+        start_epoch += 1  # resume from next epoch
+        print('loaded epoch {}, best_loss={:.6f}, best_iou={}'.format(
+            start_epoch - 1, best_loss, best_iou if best_iou else "N/A"))
+        if best_score is not None:
+            print('best_score={:.6f}'.format(best_score))
+
     best_loss = 1e5
     best_iou = None
     best_score = None
     best_score_metrics = None
+    start_epoch = 0
 
     #for val
     val_dataset = EvUAV(cfg, mode='val')
@@ -369,6 +443,20 @@ if __name__ == '__main__':
         'density_dual_view_extra_sample_count': (
             dataset.density_dual_view_extra_sample_count
         ),
+        'dense_specialist_enabled': dataset.dense_specialist_enabled,
+        'dense_specialist_event_count_cutoff': (
+            dataset.dense_specialist_event_count_cutoff
+        ),
+        'dense_specialist_views_per_video': (
+            dataset.dense_specialist_views_per_video
+        ),
+        'dense_specialist_target_preserving_enabled': (
+            dataset.dense_specialist_target_preserving_enabled
+        ),
+        'dense_specialist_source_video_count': (
+            dataset.dense_specialist_source_video_count
+        ),
+        'dense_specialist_sample_count': dataset.dense_specialist_sample_count,
         'config_overrides': ' '.join(cfg.config_overrides),
         'p1_hard_negative_enabled': stc_criterion.p1_hard_negative_enabled,
         'p1_hard_negative_weight': stc_criterion.p1_hard_negative_weight,
@@ -404,6 +492,16 @@ if __name__ == '__main__':
         'p17_positive_ranking_warmup_epochs': (
             stc_criterion.p17_positive_ranking_warmup_epochs
         ),
+        'p22_target_frame_balanced_enabled': (
+            stc_criterion.p22_target_frame_balanced_enabled
+        ),
+        'p22_target_frame_balanced_weight': (
+            stc_criterion.p22_target_frame_balanced_weight
+        ),
+        'p22_target_frame_balanced_warmup_epochs': (
+            stc_criterion.p22_target_frame_balanced_warmup_epochs
+        ),
+        'p22_temporal_bin_size': stc_criterion.p22_temporal_bin_size,
         'p2b_density_gdsca_enabled': cfg.p2b_density_gdsca_enabled,
         'p16_global_patch_attention_enabled': getattr(
             cfg,
@@ -453,7 +551,7 @@ if __name__ == '__main__':
         ),
     })
 
-    for epoch in range(cfg.epochs):
+    for epoch in range(start_epoch, cfg.epochs):
         stc_criterion.set_epoch(epoch)
         pbar = tqdm.tqdm(total=len(train_dataloader), unit="Batch", unit_scale=True,
                          desc="Epoch: {}".format(epoch),position=0,leave=True)
@@ -502,6 +600,11 @@ if __name__ == '__main__':
                 postfix['p17'] = (
                     stc_criterion.p17_positive_ranking_weight
                     * stc_criterion.last_p17_positive_ranking_loss.item()
+                )
+            if stc_criterion.p22_target_frame_balanced_active:
+                postfix['p22'] = (
+                    stc_criterion.p22_target_frame_balanced_weight
+                    * stc_criterion.last_p22_target_frame_balanced_loss.item()
                 )
             pbar.set_postfix(**postfix)
             pbar.update(1)
@@ -573,19 +676,28 @@ if __name__ == '__main__':
                         'p17_background_count',
                         stc_criterion.last_p17_background_count,
                     )
+                if stc_criterion.p22_target_frame_balanced_enabled:
+                    mlflow.log_metric(
+                        'p22_target_frame_balanced_loss',
+                        stc_criterion.last_p22_target_frame_balanced_loss.item(),
+                    )
+                    mlflow.log_metric(
+                        'p22_target_frame_count',
+                        stc_criterion.last_p22_target_frame_count,
+                    )
                 if loss_value < best_loss:
-                    save_checkpoint(net.state_dict(), best_loss_path)
+                    save_full_checkpoint(net, optimizer, scheduler, epoch, best_loss, best_iou, best_score, best_score_metrics, best_loss_path)
                     best_loss = loss_value
             torch.cuda.empty_cache()
 
         scheduler.step()
-        save_checkpoint(net.state_dict(), last_path)
+        save_full_checkpoint(net, optimizer, scheduler, epoch, best_loss, best_iou, best_score, best_score_metrics, last_path)
         if checkpoint_interval and (epoch + 1) % checkpoint_interval == 0:
             periodic_path = run_dir / 'epoch_{:03d}_seed{}.pt'.format(
                 epoch,
                 seed,
             )
-            save_checkpoint(net.state_dict(), periodic_path)
+            save_full_checkpoint(net, optimizer, scheduler, epoch, best_loss, best_iou, best_score, best_score_metrics, periodic_path)
 
         with torch.no_grad():
             if epoch >= cfg.validation_start_epoch:
@@ -643,7 +755,7 @@ if __name__ == '__main__':
                     )
 
                 if best_iou is None or iou > best_iou:
-                    save_checkpoint(net.state_dict(), best_iou_path)
+                    save_full_checkpoint(net, optimizer, scheduler, epoch, best_loss, best_iou, best_score, best_score_metrics, best_iou_path)
                     best_iou = iou
                 mlflow.log_metric('val_iou', iou, step=epoch)
 
@@ -654,7 +766,7 @@ if __name__ == '__main__':
                     mlflow.log_metric('val_score_fa', metrics.score_fa, step=epoch)
                     mlflow.log_metric('val_score', metrics.score, step=epoch)
                     if best_score is None or metrics.score > best_score:
-                        save_checkpoint(net.state_dict(), best_score_path)
+                        save_full_checkpoint(net, optimizer, scheduler, epoch, best_loss, best_iou, best_score, best_score_metrics, best_score_path)
                         best_score = metrics.score
                         best_score_metrics = metrics.to_dict()
                     print(

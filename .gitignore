@@ -1,40 +1,19 @@
+# Training/inference artifacts
+log/
+runs/
+*.pt
+*.pth
+
 # Python
 __pycache__/
 *.py[cod]
-*.so
-.pytest_cache/
+*.egg-info/
 
-# Local environments and editor files
-.venv/
-venv/
-env/
-.vscode/
-.idea/
-.agents/
-.codex/
-
-# Dataset, checkpoints, generated results, and experiment tracking
-dataset/EV-UAV-dataset/
+# Data (download separately, see README 数据准备)
 dataset/训练集、验证集/
-log/
-mlruns/
+dataset/train/
+dataset/val/
 
-# Large local artifacts (keep source code and configuration in Git)
-*.npz
-*.pt
-*.pth
-*.ckpt
-*.onnx
-*.zip
-*.tar
-*.tar.gz
-runs/
-checkpoints/
-
-# Native extension build outputs
-lib/hais_ops/build/
-lib/hais_ops/*.egg-info/
-
-# Local configuration and caches
-.cache/
-*.log
+# Misc
+.DS_Store
+*.swp

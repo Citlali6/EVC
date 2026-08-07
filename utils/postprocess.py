@@ -112,6 +112,80 @@ class P0bTrackFilterConfig:
         )
 
 
+@dataclass(frozen=True)
+class P18ScoreTrackRecoveryConfig:
+    """Recover one weak event from a seed-supported score track.
+
+    The module can be restricted to an observable event-count interval. A
+    retained P0/P0c positive is a seed; only lower-score components that form
+    a short, spatially continuous track with such a seed can contribute a
+    restored event. It never uses labels or video names.
+    """
+
+    enabled: bool = False
+    event_count_cutoff: int = 100000
+    max_event_count: int = 0
+    candidate_floor: float = 0.80
+    spatial_radius: int = 2
+    temporal_bin_size: int = 50
+    max_link_distance: float = 6.0
+    max_gap_bins: int = 1
+    min_track_bins: int = 2
+    restore_mode: str = 'best'
+    max_restore_events_per_component: int = 0
+
+    def __post_init__(self):
+        if self.event_count_cutoff <= 0:
+            raise ValueError('p18_event_count_cutoff must be positive.')
+        if self.max_event_count < 0:
+            raise ValueError('p18_max_event_count must be non-negative.')
+        if not 0.0 <= self.candidate_floor <= 1.0:
+            raise ValueError('p18_candidate_floor must be in [0, 1].')
+        if self.spatial_radius < 0:
+            raise ValueError('p18_spatial_radius must be >= 0.')
+        if self.temporal_bin_size <= 0:
+            raise ValueError('p18_temporal_bin_size must be > 0.')
+        if self.max_link_distance < 0:
+            raise ValueError('p18_max_link_distance must be >= 0.')
+        if self.max_gap_bins < 1:
+            raise ValueError('p18_max_gap_bins must be >= 1.')
+        if self.min_track_bins < 2:
+            raise ValueError('p18_min_track_bins must be at least 2.')
+        if self.restore_mode not in {'best', 'component', 'topk'}:
+            raise ValueError(
+                "p18_restore_mode must be one of: 'best', 'component', 'topk'."
+            )
+        if self.max_restore_events_per_component < 0:
+            raise ValueError(
+                'p18_max_restore_events_per_component must be non-negative.'
+            )
+        if self.restore_mode == 'topk' and self.max_restore_events_per_component < 1:
+            raise ValueError(
+                'p18_max_restore_events_per_component must be positive when '
+                'p18_restore_mode=topk.'
+            )
+
+    @classmethod
+    def from_cfg(cls, cfg):
+        return cls(
+            enabled=_as_bool(getattr(cfg, 'p18_score_track_recovery_enabled', False)),
+            event_count_cutoff=int(getattr(cfg, 'p18_event_count_cutoff', 100000)),
+            max_event_count=int(getattr(cfg, 'p18_max_event_count', 0)),
+            candidate_floor=float(getattr(cfg, 'p18_candidate_floor', 0.80)),
+            spatial_radius=int(getattr(cfg, 'p18_spatial_radius', 2)),
+            temporal_bin_size=int(
+                getattr(cfg, 'p18_temporal_bin_size', getattr(cfg, 'pd_detT', 50))
+            ),
+            max_link_distance=float(getattr(cfg, 'p18_max_link_distance', 6.0)),
+            max_gap_bins=int(getattr(cfg, 'p18_max_gap_bins', 1)),
+            min_track_bins=int(getattr(cfg, 'p18_min_track_bins', 2)),
+            restore_mode=str(getattr(cfg, 'p18_restore_mode', 'best')),
+            max_restore_events_per_component=int(
+                getattr(cfg, 'p18_max_restore_events_per_component', 0)
+            ),
+        )
+
+
 @dataclass
 class P0ClusterFilterStats:
     """Aggregate statistics for one or more filtered batches."""
@@ -200,6 +274,51 @@ class P0bTrackFilterStats:
             self.component_count,
             self.kept_tracks,
             self.removed_tracks,
+        )
+
+
+@dataclass
+class P18ScoreTrackRecoveryStats:
+    """Aggregate statistics for score-level temporal track recovery."""
+
+    enabled: bool
+    eligible_videos: int = 0
+    input_positive_events: int = 0
+    output_positive_events: int = 0
+    candidate_components: int = 0
+    track_count: int = 0
+    supported_tracks: int = 0
+    restored_components: int = 0
+    restored_events: int = 0
+
+    def merge(self, other):
+        if self.enabled != other.enabled:
+            raise ValueError('Cannot merge enabled and disabled P18 statistics.')
+        self.eligible_videos += other.eligible_videos
+        self.input_positive_events += other.input_positive_events
+        self.output_positive_events += other.output_positive_events
+        self.candidate_components += other.candidate_components
+        self.track_count += other.track_count
+        self.supported_tracks += other.supported_tracks
+        self.restored_components += other.restored_components
+        self.restored_events += other.restored_events
+
+    def summary(self):
+        if not self.enabled:
+            return 'disabled (predictions unchanged)'
+        return (
+            'enabled, eligible videos: {}; positive events: {} -> {}; '
+            'candidate components: {}; seed-supported tracks: {} / {}; '
+            'restored: {} components / {} events'
+        ).format(
+            self.eligible_videos,
+            self.input_positive_events,
+            self.output_positive_events,
+            self.candidate_components,
+            self.supported_tracks,
+            self.track_count,
+            self.restored_components,
+            self.restored_events,
         )
 
 
@@ -712,20 +831,305 @@ class P0bTrackFilter:
         return filtered_predictions.reshape_as(predictions), stats
 
 
+def _recover_one_video_by_score_tracks(
+    prediction_scores,
+    coordinates,
+    config,
+    prediction_threshold,
+):
+    """Find weak events connected to a retained score-track seed.
+
+    ``prediction_scores`` are the scores after P0/P0c.  This matters: P0
+    removals are zeroed and therefore cannot create a recovery seed.
+    """
+    event_count = prediction_scores.shape[0]
+    input_positive_count = int((prediction_scores >= prediction_threshold).sum())
+    stats = P18ScoreTrackRecoveryStats(
+        enabled=True,
+        input_positive_events=input_positive_count,
+        output_positive_events=input_positive_count,
+    )
+    recovery_mask = np.zeros(event_count, dtype=bool)
+    if (
+        event_count <= config.event_count_cutoff
+        or (config.max_event_count and event_count > config.max_event_count)
+    ):
+        return recovery_mask, stats
+
+    stats.eligible_videos = 1
+    seed_mask = prediction_scores >= prediction_threshold
+    weak_mask = (
+        (prediction_scores >= config.candidate_floor)
+        & ~seed_mask
+    )
+    candidate_mask = seed_mask | weak_mask
+    candidate_indices = np.flatnonzero(candidate_mask)
+    if candidate_indices.size == 0 or not seed_mask.any() or not weak_mask.any():
+        return recovery_mask, stats
+
+    candidate_coordinates = coordinates[candidate_indices]
+    temporal_bins = np.floor_divide(
+        candidate_coordinates[:, 2],
+        config.temporal_bin_size,
+    )
+    tracks = []
+
+    for temporal_bin in np.unique(temporal_bins):
+        bin_candidate_indices = np.flatnonzero(temporal_bins == temporal_bin)
+        components = _spatial_components_in_bin(
+            candidate_coordinates[bin_candidate_indices],
+            candidate_indices[bin_candidate_indices],
+            config.spatial_radius,
+        )
+        for component in components:
+            component_scores = prediction_scores[component['event_indices']]
+            score_order = np.argsort(component_scores)[::-1]
+            component['sorted_event_indices'] = component['event_indices'][score_order]
+            component['has_seed'] = bool(
+                seed_mask[component['event_indices']].any()
+            )
+        stats.candidate_components += len(components)
+
+        candidate_links = []
+        for track_index, track in enumerate(tracks):
+            bin_difference = int(temporal_bin - track['last_bin'])
+            if not 1 <= bin_difference <= config.max_gap_bins:
+                continue
+            for component_index, component in enumerate(components):
+                distance = float(
+                    np.linalg.norm(component['centroid'] - track['centroid'])
+                )
+                if distance <= config.max_link_distance:
+                    candidate_links.append((distance, track_index, component_index))
+
+        assigned_tracks = set()
+        assigned_components = set()
+        for _, track_index, component_index in sorted(candidate_links):
+            if track_index in assigned_tracks or component_index in assigned_components:
+                continue
+            track = tracks[track_index]
+            component = components[component_index]
+            track['components'].append(component)
+            track['frame_count'] += 1
+            track['has_seed'] = track['has_seed'] or component['has_seed']
+            track['centroid'] = component['centroid']
+            track['last_bin'] = int(temporal_bin)
+            assigned_tracks.add(track_index)
+            assigned_components.add(component_index)
+
+        for component_index, component in enumerate(components):
+            if component_index in assigned_components:
+                continue
+            tracks.append(
+                {
+                    'components': [component],
+                    'frame_count': 1,
+                    'has_seed': component['has_seed'],
+                    'centroid': component['centroid'],
+                    'last_bin': int(temporal_bin),
+                }
+            )
+
+    stats.track_count = len(tracks)
+    for track in tracks:
+        if not (
+            track['has_seed']
+            and track['frame_count'] >= config.min_track_bins
+        ):
+            continue
+        stats.supported_tracks += 1
+        for component in track['components']:
+            if component['has_seed']:
+                continue
+            if config.restore_mode == 'best':
+                recovered_indices = component['sorted_event_indices'][:1]
+            elif config.restore_mode == 'topk':
+                recovered_indices = component['sorted_event_indices'][
+                    :config.max_restore_events_per_component
+                ]
+            else:
+                recovered_indices = component['event_indices']
+                if config.max_restore_events_per_component:
+                    recovered_indices = component['sorted_event_indices'][
+                        :config.max_restore_events_per_component
+                    ]
+            if recovered_indices.size == 0:
+                continue
+            recovery_mask[recovered_indices] = True
+            stats.restored_components += 1
+
+    stats.restored_events = int(recovery_mask.sum())
+    stats.output_positive_events += stats.restored_events
+    return recovery_mask, stats
+
+
+def recover_seed_supported_track_events(
+    prediction_scores,
+    locations,
+    config,
+    prediction_threshold,
+):
+    """Return a mask of label-free P18 weak-event recoveries.
+
+    Locations follow the project convention ``[batch, x, y, t]``.  Each batch
+    member is treated as an independent video, so a recovered track never
+    crosses a video boundary.
+    """
+    prediction_scores = np.asarray(prediction_scores, dtype=np.float64).reshape(-1)
+    locations = np.asarray(locations)
+    if locations.ndim != 2 or locations.shape[1] < 4:
+        raise ValueError(
+            'locations must have shape [N, 4+] ordered as [batch, x, y, t].'
+        )
+    if locations.shape[0] != prediction_scores.shape[0]:
+        raise ValueError('prediction_scores and locations must have the same length.')
+    if not 0.0 <= prediction_threshold <= 1.0:
+        raise ValueError('prediction_threshold must be in [0, 1].')
+
+    input_positive_count = int((prediction_scores >= prediction_threshold).sum())
+    if not config.enabled:
+        return np.zeros(prediction_scores.shape[0], dtype=bool), P18ScoreTrackRecoveryStats(
+            enabled=False,
+            input_positive_events=input_positive_count,
+            output_positive_events=input_positive_count,
+        )
+
+    recovery_mask = np.zeros(prediction_scores.shape[0], dtype=bool)
+    stats = P18ScoreTrackRecoveryStats(enabled=True)
+    batch_ids = locations[:, 0].astype(np.int64, copy=False)
+    for batch_id in np.unique(batch_ids):
+        video_indices = np.flatnonzero(batch_ids == batch_id)
+        video_recovery_mask, video_stats = _recover_one_video_by_score_tracks(
+            prediction_scores[video_indices],
+            locations[video_indices, 1:4].astype(np.int64, copy=False),
+            config,
+            prediction_threshold,
+        )
+        recovery_mask[video_indices] = video_recovery_mask
+        stats.merge(video_stats)
+
+    return recovery_mask, stats
+
+
+class P18ScoreTrackRecovery:
+    """Restore one weak event for seed-supported dense-video tracks."""
+
+    def __init__(self, config, prediction_threshold=0.9):
+        if not 0.0 <= prediction_threshold <= 1.0:
+            raise ValueError('prediction_threshold must be in [0, 1].')
+        self.config = config
+        self.prediction_threshold = float(prediction_threshold)
+
+    @classmethod
+    def from_cfg(cls, cfg, prediction_threshold=0.9):
+        return cls(
+            P18ScoreTrackRecoveryConfig.from_cfg(cfg),
+            prediction_threshold,
+        )
+
+    @property
+    def enabled(self):
+        return self.config.enabled
+
+    def new_stats(self):
+        return P18ScoreTrackRecoveryStats(enabled=self.enabled)
+
+    def describe(self):
+        if not self.enabled:
+            return 'disabled'
+        return (
+            'enabled (event_count > {} and <= {}, candidate_floor={}, spatial_radius={}, '
+            'temporal_bin_size={}, max_link_distance={}, max_gap_bins={}, '
+            'min_track_bins={}, restore_mode={}, max_restore_events_per_component={})'
+        ).format(
+            self.config.event_count_cutoff,
+            self.config.max_event_count or 'unbounded',
+            self.config.candidate_floor,
+            self.config.spatial_radius,
+            self.config.temporal_bin_size,
+            self.config.max_link_distance,
+            self.config.max_gap_bins,
+            self.config.min_track_bins,
+            self.config.restore_mode,
+            self.config.max_restore_events_per_component,
+        )
+
+    def apply(self, predictions, locations):
+        """Raise recovered weak scores to the current decision threshold."""
+        if not self.enabled:
+            return predictions, P18ScoreTrackRecoveryStats(enabled=False)
+
+        import torch
+
+        flattened_predictions = predictions.reshape(-1)
+        if flattened_predictions.numel() != locations.shape[0]:
+            raise ValueError(
+                'Prediction and location counts do not match: {} and {}.'.format(
+                    flattened_predictions.numel(), locations.shape[0]
+                )
+            )
+        recovery_mask, stats = recover_seed_supported_track_events(
+            flattened_predictions.detach().cpu().numpy(),
+            locations.detach().cpu().numpy(),
+            self.config,
+            self.prediction_threshold,
+        )
+        if not recovery_mask.any():
+            return predictions, stats
+
+        recovered_predictions = flattened_predictions.clone()
+        recovery_tensor_mask = torch.from_numpy(recovery_mask).to(
+            device=recovered_predictions.device
+        )
+        recovered_predictions[recovery_tensor_mask] = self.prediction_threshold
+        return recovered_predictions.reshape_as(predictions), stats
+
+
+@dataclass
+class ChallengePostprocessStats:
+    """Composite P0/P0b and optional P18 inference statistics."""
+
+    base_stats: object
+    recovery_stats: P18ScoreTrackRecoveryStats
+
+    def __getattr__(self, name):
+        """Preserve the base-statistics interface for diagnostic callers."""
+        return getattr(self.base_stats, name)
+
+    def merge(self, other):
+        self.base_stats.merge(other.base_stats)
+        self.recovery_stats.merge(other.recovery_stats)
+
+    def summary(self):
+        summary = self.base_stats.summary()
+        if self.recovery_stats.enabled:
+            summary += '; P18 score-track recovery: {}'.format(
+                self.recovery_stats.summary()
+            )
+        return summary
+
+
 class ChallengePostprocessor:
-    """Select one optional Challenge 2 post-processing module.
+    """Apply P0/P0b followed by optional P18 score-track recovery.
 
     P0 and P0b have overlapping purposes. Requiring one at a time keeps their
     validation result attributable to a single, reproducible configuration.
+    P18 is intentionally a separate recovery stage: it can use P0-retained
+    positives as track seeds but cannot reintroduce P0-suppressed seed noise.
     """
 
-    def __init__(self, postprocessor):
+    def __init__(self, postprocessor, score_track_recovery):
         self._postprocessor = postprocessor
+        self._score_track_recovery = score_track_recovery
 
     @classmethod
     def from_cfg(cls, cfg, prediction_threshold=0.9):
         p0_filter = P0ClusterFilter.from_cfg(cfg, prediction_threshold)
         p0b_filter = P0bTrackFilter.from_cfg(cfg, prediction_threshold)
+        score_track_recovery = P18ScoreTrackRecovery.from_cfg(
+            cfg,
+            prediction_threshold,
+        )
         if (
             p0_filter.config.high_confidence_recovery_enabled
             and not p0_filter.enabled
@@ -737,17 +1141,37 @@ class ChallengePostprocessor:
             raise ValueError(
                 'P0 and P0b cannot be enabled together. Choose one postprocessor.'
             )
-        return cls(p0b_filter if p0b_filter.enabled else p0_filter)
+        if score_track_recovery.enabled and not p0_filter.enabled:
+            raise ValueError(
+                'P18 score-track recovery requires POSTPROCESS.p0_enabled=true.'
+            )
+        return cls(
+            p0b_filter if p0b_filter.enabled else p0_filter,
+            score_track_recovery,
+        )
 
     @property
     def enabled(self):
-        return self._postprocessor.enabled
+        return self._postprocessor.enabled or self._score_track_recovery.enabled
 
     def new_stats(self):
-        return self._postprocessor.new_stats()
+        return ChallengePostprocessStats(
+            self._postprocessor.new_stats(),
+            self._score_track_recovery.new_stats(),
+        )
 
     def describe(self):
-        return self._postprocessor.describe()
+        description = self._postprocessor.describe()
+        if self._score_track_recovery.enabled:
+            description += '; P18 score-track recovery: {}'.format(
+                self._score_track_recovery.describe()
+            )
+        return description
 
     def apply(self, predictions, locations):
-        return self._postprocessor.apply(predictions, locations)
+        predictions, base_stats = self._postprocessor.apply(predictions, locations)
+        predictions, recovery_stats = self._score_track_recovery.apply(
+            predictions,
+            locations,
+        )
+        return predictions, ChallengePostprocessStats(base_stats, recovery_stats)

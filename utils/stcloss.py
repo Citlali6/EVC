@@ -15,6 +15,7 @@ from utils.positive_reweight import (
 )
 from utils.target_frame_loss import target_frame_detection_loss
 from utils.positive_ranking import positive_hard_ranking_loss
+from utils.target_frame_balanced import target_frame_balanced_positive_loss
 
 
 class STCLoss(nn.Module):
@@ -112,6 +113,18 @@ class STCLoss(nn.Module):
         self.p17_positive_ranking_warmup_epochs = int(
             getattr(cfg, 'p17_positive_ranking_warmup_epochs', 10)
         )
+        self.p22_target_frame_balanced_enabled = bool(
+            getattr(cfg, 'p22_target_frame_balanced_enabled', False)
+        )
+        self.p22_target_frame_balanced_weight = float(
+            getattr(cfg, 'p22_target_frame_balanced_weight', 0.02)
+        )
+        self.p22_target_frame_balanced_warmup_epochs = int(
+            getattr(cfg, 'p22_target_frame_balanced_warmup_epochs', 0)
+        )
+        self.p22_temporal_bin_size = int(
+            getattr(cfg, 'p22_temporal_bin_size', getattr(cfg, 'pd_detT', 50))
+        )
         if self.p1_hard_negative_weight < 0:
             raise ValueError('p1_hard_negative_weight must be non-negative.')
         if not 0 < self.p1_hard_negative_ratio <= 1:
@@ -152,6 +165,14 @@ class STCLoss(nn.Module):
             raise ValueError(
                 'p17_positive_ranking_warmup_epochs must be non-negative.'
             )
+        if self.p22_target_frame_balanced_weight < 0:
+            raise ValueError('p22_target_frame_balanced_weight must be non-negative.')
+        if self.p22_target_frame_balanced_warmup_epochs < 0:
+            raise ValueError(
+                'p22_target_frame_balanced_warmup_epochs must be non-negative.'
+            )
+        if self.p22_temporal_bin_size <= 0:
+            raise ValueError('p22_temporal_bin_size must be positive.')
 
         self.current_epoch = 0
         self.last_stc_loss = None
@@ -170,6 +191,8 @@ class STCLoss(nn.Module):
         self.last_p17_positive_ranking_loss = None
         self.last_p17_positive_count = 0
         self.last_p17_background_count = 0
+        self.last_p22_target_frame_balanced_loss = None
+        self.last_p22_target_frame_count = 0
 
     @property
     def p1_hard_negative_active(self):
@@ -215,8 +238,20 @@ class STCLoss(nn.Module):
         )
 
     @property
+    def p22_target_frame_balanced_active(self):
+        return (
+            self.p22_target_frame_balanced_enabled
+            and self.current_epoch >= self.p22_target_frame_balanced_warmup_epochs
+            and self.p22_target_frame_balanced_weight > 0
+        )
+
+    @property
     def requires_target_ids(self):
-        return self.p4_target_frame_active or self.p13_target_frame_active
+        return (
+            self.p4_target_frame_active
+            or self.p13_target_frame_active
+            or self.p22_target_frame_balanced_active
+        )
 
     @property
     def requires_locations(self):
@@ -224,6 +259,7 @@ class STCLoss(nn.Module):
             self.p4_target_frame_active
             or self.p13_target_frame_active
             or self.p13_background_component_active
+            or self.p22_target_frame_balanced_active
         )
 
     def set_epoch(self, epoch):
@@ -291,6 +327,17 @@ class STCLoss(nn.Module):
             self.p17_positive_ranking_ratio,
             self.p17_positive_ranking_margin,
             self.p17_positive_ranking_warmup_epochs,
+        )
+
+    def describe_p22(self):
+        if not self.p22_target_frame_balanced_enabled:
+            return 'disabled'
+        return (
+            'enabled (weight={}, warmup_epochs={}, temporal_bin_size={})'
+        ).format(
+            self.p22_target_frame_balanced_weight,
+            self.p22_target_frame_balanced_warmup_epochs,
+            self.p22_temporal_bin_size,
         )
 
     def forward(self, voxel, p2v_map, preds, label, target_ids=None, locations=None):
@@ -375,21 +422,6 @@ class STCLoss(nn.Module):
                     self.p13_activation_temperature,
                     self.eps,
                 )
-
-        p17_positive_ranking_loss = preds.sum() * 0
-        p17_positive_count = 0
-        p17_background_count = 0
-        if self.p17_positive_ranking_active:
-            (
-                p17_positive_ranking_loss,
-                p17_positive_count,
-                p17_background_count,
-            ) = positive_hard_ranking_loss(
-                preds,
-                label,
-                self.p17_positive_ranking_ratio,
-                self.p17_positive_ranking_margin,
-            )
             if self.p13_background_component_active:
                 (
                     p13_component_hard_negative_loss,
@@ -407,6 +439,40 @@ class STCLoss(nn.Module):
                     self.p13_activation_temperature,
                     self.eps,
                 )
+
+        p17_positive_ranking_loss = preds.sum() * 0
+        p17_positive_count = 0
+        p17_background_count = 0
+        if self.p17_positive_ranking_active:
+            (
+                p17_positive_ranking_loss,
+                p17_positive_count,
+                p17_background_count,
+            ) = positive_hard_ranking_loss(
+                preds,
+                label,
+                self.p17_positive_ranking_ratio,
+                self.p17_positive_ranking_margin,
+            )
+
+        p22_target_frame_balanced_loss = preds.sum() * 0
+        p22_target_frame_count = 0
+        if self.p22_target_frame_balanced_active:
+            if target_ids is None or locations is None:
+                raise ValueError(
+                    'target_ids and locations are required when P22 is enabled.'
+                )
+            (
+                p22_target_frame_balanced_loss,
+                p22_target_frame_count,
+            ) = target_frame_balanced_positive_loss(
+                preds,
+                label,
+                target_ids,
+                locations,
+                self.p22_temporal_bin_size,
+                self.eps,
+            )
 
         self.last_stc_loss = stc_loss.detach()
         self.last_p1_hard_negative_loss = p1_hard_negative_loss.detach()
@@ -426,6 +492,10 @@ class STCLoss(nn.Module):
         self.last_p17_positive_ranking_loss = p17_positive_ranking_loss.detach()
         self.last_p17_positive_count = p17_positive_count
         self.last_p17_background_count = p17_background_count
+        self.last_p22_target_frame_balanced_loss = (
+            p22_target_frame_balanced_loss.detach()
+        )
+        self.last_p22_target_frame_count = p22_target_frame_count
         return (
             stc_loss
             + self.p1_hard_negative_weight * p1_hard_negative_loss
@@ -434,4 +504,6 @@ class STCLoss(nn.Module):
             * p13_component_hard_negative_loss
             + self.p13_target_frame_weight * p13_target_frame_loss
             + self.p17_positive_ranking_weight * p17_positive_ranking_loss
+            + self.p22_target_frame_balanced_weight
+            * p22_target_frame_balanced_loss
         )

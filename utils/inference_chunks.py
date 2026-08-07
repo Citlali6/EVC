@@ -118,7 +118,13 @@ def evaluation_batch_from_sample(sample):
     }
 
 
-def predict_full_event_scores(predictor, dataset, sample, device):
+def predict_full_event_scores(
+    predictor,
+    dataset,
+    sample,
+    device,
+    source_event_count=None,
+):
     """Run one ordinary single-video forward pass and return CPU scores."""
     import torch
 
@@ -128,6 +134,10 @@ def predict_full_event_scores(predictor, dataset, sample, device):
             sparse_batch["voxel_ev"],
             sparse_batch["p2v_map"].long().to(device),
             event_frame=sparse_batch.get("event_frame"),
+            source_event_count=(
+                len(sample["ev_loc"])
+                if source_event_count is None else int(source_event_count)
+            ),
         ).detach().cpu().reshape(-1).clone()
     if scores.numel() != len(sample["ev_loc"]):
         raise RuntimeError("Inference scores do not match the source event count.")
@@ -155,6 +165,7 @@ def _predict_one_random_partition(predictor, dataset, sample, device, chunk_size
             dataset,
             subset_inference_sample(sample, indices),
             device,
+            source_event_count=event_count,
         )
         if scores is None:
             scores = torch.empty(event_count, dtype=chunk_scores.dtype)

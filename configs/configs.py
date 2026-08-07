@@ -48,7 +48,7 @@ def get_parser():
         help='override YAML values, for example: --set POSTPROCESS.p0_enabled=true',
     )
 
-    args_cfg = parser.parse_args()
+    args_cfg, unknown = parser.parse_known_args()
     assert args_cfg.config is not None
     with open(args_cfg.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.CLoader)

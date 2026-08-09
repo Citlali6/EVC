@@ -48,16 +48,42 @@ from utils.eval import evalute
 from utils.postprocess import ChallengePostprocessor
 
 
-CACHE_SCHEMA = "evc-temporal-memory-raw-probabilities-v1"
+CACHE_SCHEMA = "evc-temporal-memory-raw-probabilities-v2"
 DEFAULT_CONFIG = Path(__file__).resolve().parent / "configs" / "evisseg_evuav.yaml"
 METRIC_NAMES = ("iou", "acc", "pd", "fa", "score_fa", "score")
-CODE_PROVENANCE_PATHS = (
+INFERENCE_SETTING_NAMES = (
+    "temporal_memory_bin_size",
+    "temporal_memory_context_bins",
+    "temporal_memory_width",
+    "temporal_memory_sequence_length",
+    "temporal_memory_inference_batch_size",
+    "temporal_memory_log_count_clip",
+    "whole_t",
+    "resolution",
+)
+OFFICIAL_VALIDATION_VIDEO_COUNT = 24
+OFFICIAL_VALIDATION_STEMS = tuple(
+    "val_{:03d}".format(index) for index in range(OFFICIAL_VALIDATION_VIDEO_COUNT)
+)
+CACHE_CODE_PROVENANCE_PATHS = (
+    "dataset/basedataset.py",
     "dataset/ev_uav.py",
     "dataset/temporal_frame.py",
+    "model/modules/confidence_head.py",
+    "model/temporal_frame_net.py",
     "model/temporal_memory_net.py",
     "utils/temporal_frame_inference.py",
     "utils/temporal_memory_inference.py",
 )
+REPLAY_CODE_PROVENANCE_PATHS = (
+    "replay_temporal_memory_validation.py",
+    "utils/challenge_eval.py",
+    "utils/density_threshold.py",
+    "utils/eval.py",
+    "utils/postprocess.py",
+)
+# Backward-compatible name for callers that imported the original constant.
+CODE_PROVENANCE_PATHS = CACHE_CODE_PROVENANCE_PATHS
 
 
 @dataclass(frozen=True)
@@ -186,12 +212,51 @@ def _inference_settings(cfg) -> dict:
     }
 
 
-def _code_provenance(project_root: Path) -> dict:
+def _code_provenance(
+    project_root: Path,
+    relative_paths: Sequence[str] = CACHE_CODE_PROVENANCE_PATHS,
+) -> dict:
     result = {}
-    for relative_path in CODE_PROVENANCE_PATHS:
+    for relative_path in relative_paths:
         path = project_root / relative_path
         result[relative_path] = sha256_file(path) if path.is_file() else None
     return result
+
+
+def _validate_official_validation_names(
+    file_names: Sequence[str],
+    context: str,
+) -> None:
+    """Require the complete, canonical Challenge 2 validation split."""
+
+    names = tuple(str(name) for name in file_names)
+    if len(names) != OFFICIAL_VALIDATION_VIDEO_COUNT:
+        raise ValueError(
+            "{} must contain exactly {} official validation videos; found {}.".format(
+                context, OFFICIAL_VALIDATION_VIDEO_COUNT, len(names)
+            )
+        )
+    stems = tuple(Path(name).stem for name in names)
+    if len(set(stems)) != len(stems):
+        raise ValueError("{} contains duplicate validation stems.".format(context))
+    expected = set(OFFICIAL_VALIDATION_STEMS)
+    actual = set(stems)
+    if actual != expected:
+        missing = ", ".join(sorted(expected - actual)) or "none"
+        unexpected = ", ".join(sorted(actual - expected)) or "none"
+        raise ValueError(
+            "{} does not contain the canonical val_000..val_023 stems "
+            "(missing: {}; unexpected: {}).".format(context, missing, unexpected)
+        )
+
+
+def _validate_expected_video_count(expected_video_count: int) -> None:
+    if int(expected_video_count) != OFFICIAL_VALIDATION_VIDEO_COUNT:
+        raise ValueError(
+            "Complete official validation is mandatory; expected_video_count must be {}.".format(
+                OFFICIAL_VALIDATION_VIDEO_COUNT
+            )
+        )
 
 
 def _dataset_signature(records: Sequence[Mapping]) -> str:
@@ -214,7 +279,10 @@ def _atomic_torch_save(payload: dict, output_path: Path) -> None:
     os.close(descriptor)
     temporary_path = Path(temporary_name)
     try:
-        torch.save(payload, temporary_path)
+        with temporary_path.open("wb") as handle:
+            torch.save(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(str(temporary_path), str(output_path))
     finally:
         if temporary_path.exists():
@@ -230,6 +298,8 @@ def build_raw_cache(
 ) -> dict:
     """Run one checkpoint once per complete validation video and save raw scores."""
 
+    _validate_expected_video_count(expected_video_count)
+
     # Imports stay inside the GPU-only operation so CPU replay and unit tests do
     # not initialize model code or require optional sparse-convolution modules.
     from dataset.ev_uav import EvUAV
@@ -240,6 +310,8 @@ def build_raw_cache(
         predict_temporal_memory_scores,
     )
 
+    project_root = Path(__file__).resolve().parent
+    code_provenance = _code_provenance(project_root)
     checkpoint_path = Path(checkpoint_path).resolve()
     output_path = Path(output_path).resolve()
     if not checkpoint_path.is_file():
@@ -264,12 +336,7 @@ def build_raw_cache(
     dataset.file_list = sorted(dataset.file_list)
     if not dataset.file_list:
         raise RuntimeError("No validation files found in: {}".format(dataset.root))
-    if expected_video_count and len(dataset.file_list) != int(expected_video_count):
-        raise RuntimeError(
-            "Expected {} validation videos, found {} in {}.".format(
-                expected_video_count, len(dataset.file_list), dataset.root
-            )
-        )
+    _validate_official_validation_names(dataset.file_list, "validation dataset")
 
     records = []
     started = datetime.now(timezone.utc)
@@ -343,7 +410,10 @@ def build_raw_cache(
         raise RuntimeError(
             "Checkpoint changed while inference was running; refusing to save a mixed cache."
         )
-    project_root = Path(__file__).resolve().parent
+    if _code_provenance(project_root) != code_provenance:
+        raise RuntimeError(
+            "Inference code changed while caching; refusing to save ambiguous provenance."
+        )
     metadata = {
         "schema": CACHE_SCHEMA,
         "created_utc": finished.isoformat(),
@@ -363,9 +433,10 @@ def build_raw_cache(
         "cuda_version": torch.version.cuda,
         "device": str(device),
         "device_name": torch.cuda.get_device_name(device),
-        "code_sha256": _code_provenance(project_root),
+        "code_sha256": code_provenance,
     }
     payload = {"metadata": metadata, "records": records}
+    validate_cache_payload(payload, "new raw cache")
     _atomic_torch_save(payload, output_path)
     return payload
 
@@ -390,6 +461,36 @@ def validate_cache_payload(payload: Mapping, cache_name: str = "cache") -> None:
         raise ValueError("{} is not a validation cache.".format(cache_name))
     if not isinstance(records, list) or not records:
         raise ValueError("{} contains no validation records.".format(cache_name))
+    _validate_official_validation_names(
+        [record.get("file_name", "") for record in records if isinstance(record, Mapping)],
+        cache_name,
+    )
+    inference_settings = metadata.get("inference_settings")
+    if not isinstance(inference_settings, Mapping):
+        raise ValueError("{} is missing inference settings metadata.".format(cache_name))
+    missing_settings = set(INFERENCE_SETTING_NAMES).difference(inference_settings)
+    if missing_settings:
+        raise ValueError(
+            "{} is missing inference settings: {}.".format(
+                cache_name, ", ".join(sorted(missing_settings))
+            )
+        )
+    checkpoint_digest = metadata.get("checkpoint_sha256")
+    if not isinstance(checkpoint_digest, str) or len(checkpoint_digest) != 64 or any(
+        character not in "0123456789abcdefABCDEF" for character in checkpoint_digest
+    ):
+        raise ValueError("{} has invalid checkpoint provenance.".format(cache_name))
+    code_sha256 = metadata.get("code_sha256")
+    if not isinstance(code_sha256, Mapping):
+        raise ValueError("{} is missing inference code provenance.".format(cache_name))
+    for relative_path in CACHE_CODE_PROVENANCE_PATHS:
+        digest = code_sha256.get(relative_path)
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            character not in "0123456789abcdefABCDEF" for character in digest
+        ):
+            raise ValueError(
+                "{} has invalid code provenance for {}.".format(cache_name, relative_path)
+            )
     seen_names = set()
     for index, record in enumerate(records):
         required = {
@@ -421,14 +522,20 @@ def validate_cache_payload(payload: Mapping, cache_name: str = "cache") -> None:
             raise ValueError("{} {} locations must have shape [N, 4+].".format(cache_name, file_name))
         if not (event_count == scores.numel() == labels.numel() == locs.shape[0] == target_ids.size):
             raise ValueError("{} {} source lengths do not match.".format(cache_name, file_name))
+        if scores.dtype != torch.float32:
+            raise ValueError("{} {} scores must have dtype float32.".format(cache_name, file_name))
         if not torch.isfinite(scores).all() or bool((scores < 0).any()) or bool(
             (scores > 1).any()
         ):
             raise ValueError("{} {} contains non-probability scores.".format(cache_name, file_name))
+        if not torch.isfinite(labels).all() or bool(
+            ((labels != 0) & (labels != 1)).any()
+        ):
+            raise ValueError("{} {} labels must be finite binary values.".format(cache_name, file_name))
         expected_digest = source_digest(locs, labels, target_ids)
         if record["source_sha256"] != expected_digest:
             raise ValueError("{} {} source digest does not match.".format(cache_name, file_name))
-    if int(metadata.get("video_count", -1)) != len(records):
+    if int(metadata.get("video_count", -1)) != OFFICIAL_VALIDATION_VIDEO_COUNT:
         raise ValueError("{} video count metadata does not match.".format(cache_name))
     if int(metadata.get("event_count", -1)) != sum(int(r["event_count"]) for r in records):
         raise ValueError("{} event count metadata does not match.".format(cache_name))
@@ -445,6 +552,59 @@ def load_cache(path: Path) -> dict:
     return payload
 
 
+def load_cache_snapshot(path: Path) -> Tuple[dict, str]:
+    """Load one immutable cache snapshot and return its file digest."""
+
+    path = Path(path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError("Raw probability cache does not exist: {}".format(path))
+    digest_before = sha256_file(path)
+    payload = load_cache(path)
+    digest_after = sha256_file(path)
+    if digest_before != digest_after:
+        raise RuntimeError("Raw probability cache changed while it was being loaded: {}".format(path))
+    return payload, digest_before
+
+
+def _mapping_differences(left: Mapping, right: Mapping) -> Tuple[str, ...]:
+    keys = sorted(set(left).union(right))
+    return tuple(key for key in keys if left.get(key) != right.get(key))
+
+
+def _validate_cache_compatibility(
+    primary_payload: Mapping,
+    secondary_payload: Mapping,
+) -> None:
+    primary_metadata = primary_payload["metadata"]
+    secondary_metadata = secondary_payload["metadata"]
+    if primary_metadata["dataset_signature"] != secondary_metadata["dataset_signature"]:
+        raise ValueError("Primary and secondary cache dataset signatures differ.")
+
+    primary_settings = primary_metadata["inference_settings"]
+    secondary_settings = secondary_metadata["inference_settings"]
+    setting_differences = _mapping_differences(primary_settings, secondary_settings)
+    if setting_differences:
+        raise ValueError(
+            "Primary and secondary cache inference settings differ: {}.".format(
+                ", ".join(setting_differences)
+            )
+        )
+
+    primary_code = primary_metadata["code_sha256"]
+    secondary_code = secondary_metadata["code_sha256"]
+    code_differences = tuple(
+        path
+        for path in CACHE_CODE_PROVENANCE_PATHS
+        if primary_code.get(path) != secondary_code.get(path)
+    )
+    if code_differences:
+        raise ValueError(
+            "Primary and secondary cache inference code differs: {}.".format(
+                ", ".join(code_differences)
+            )
+        )
+
+
 def route_cache_records(
     primary_payload: Mapping,
     secondary_payload: Optional[Mapping] = None,
@@ -459,6 +619,7 @@ def route_cache_records(
     secondary_records = None
     if secondary_payload is not None:
         validate_cache_payload(secondary_payload, "secondary cache")
+        _validate_cache_compatibility(primary_payload, secondary_payload)
         secondary_records = secondary_payload["records"]
         if len(primary_records) != len(secondary_records):
             raise ValueError("Primary and secondary cache video counts differ.")
@@ -726,6 +887,12 @@ def _postprocess_settings(cfg) -> dict:
         "p0c_high_confidence_recovery_enabled",
         "p0c_retain_min_score",
         "p0b_enabled",
+        "p0b_spatial_radius",
+        "p0b_temporal_bin_size",
+        "p0b_max_link_distance",
+        "p0b_max_gap_bins",
+        "p0b_min_track_events",
+        "p0b_min_track_frames",
         "p18_score_track_recovery_enabled",
         "p18_event_count_cutoff",
         "p18_max_event_count",
@@ -741,23 +908,96 @@ def _postprocess_settings(cfg) -> dict:
     return {name: getattr(cfg, name, None) for name in names}
 
 
-def _write_json(path: Path, payload: Mapping) -> None:
+def _evaluation_settings(cfg) -> dict:
+    return {
+        "pd_detT": int(cfg.pd_detT),
+        "correct_thresh": float(cfg.correct_thresh),
+        "resolution": [int(cfg.res[0]), int(cfg.res[1])],
+    }
+
+
+def _atomic_text_write(path: Path, write_callback) -> None:
     path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=path.name + ".",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            write_callback(handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(str(temporary_path), str(path))
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
+def _write_json(path: Path, payload: Mapping) -> None:
+    def write(handle):
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
 
+    _atomic_text_write(path, write)
+
 
 def _write_csv(path: Path, results: Sequence[Mapping]) -> None:
-    path = Path(path).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
     fields = ("rank", "low_threshold", "high_threshold") + METRIC_NAMES
-    with path.open("w", encoding="utf-8", newline="") as handle:
+
+    def write(handle):
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         for rank, result in enumerate(results, start=1):
             writer.writerow({"rank": rank, **result})
+
+    _atomic_text_write(path, write)
+
+
+def _paths_alias(left: Path, right: Path) -> bool:
+    left = Path(left).resolve()
+    right = Path(right).resolve()
+    if os.path.normcase(str(left)) == os.path.normcase(str(right)):
+        return True
+    if left.exists() and right.exists():
+        try:
+            return left.samefile(right)
+        except OSError:
+            return False
+    return False
+
+
+def _require_distinct_paths(named_paths: Sequence[Tuple[str, Optional[Path]]]) -> None:
+    present = [(name, Path(path).resolve()) for name, path in named_paths if path is not None]
+    for index, (left_name, left_path) in enumerate(present):
+        for right_name, right_path in present[index + 1 :]:
+            if _paths_alias(left_path, right_path):
+                raise ValueError(
+                    "Path conflict: {} and {} resolve to the same file: {}.".format(
+                        left_name, right_name, left_path
+                    )
+                )
+
+
+def _require_outputs_available(
+    named_paths: Sequence[Tuple[str, Path]],
+    force: bool,
+) -> None:
+    if force:
+        return
+    existing = [
+        "{}={}".format(name, Path(path).resolve())
+        for name, path in named_paths
+        if Path(path).resolve().exists()
+    ]
+    if existing:
+        raise FileExistsError(
+            "Output already exists; choose a new path or use --force: {}.".format(
+                ", ".join(existing)
+            )
+        )
 
 
 def _common_config_arguments(parser: argparse.ArgumentParser) -> None:
@@ -779,7 +1019,13 @@ def parse_args(argv: Optional[Sequence[str]] = None):
     _common_config_arguments(cache_parser)
     cache_parser.add_argument("--checkpoint", type=Path, required=True)
     cache_parser.add_argument("--output-cache", type=Path, required=True)
-    cache_parser.add_argument("--expected-video-count", type=int, default=24)
+    cache_parser.add_argument(
+        "--expected-video-count",
+        type=int,
+        choices=(OFFICIAL_VALIDATION_VIDEO_COUNT,),
+        default=OFFICIAL_VALIDATION_VIDEO_COUNT,
+        help="Safety assertion; complete official validation is always required.",
+    )
     cache_parser.add_argument("--device", default="cuda:0")
     cache_parser.add_argument("--force", action="store_true")
 
@@ -798,6 +1044,7 @@ def parse_args(argv: Optional[Sequence[str]] = None):
     replay_parser.add_argument("--threshold-step", default="0.001")
     replay_parser.add_argument("--output-json", type=Path, required=True)
     replay_parser.add_argument("--output-csv", type=Path, required=True)
+    replay_parser.add_argument("--force", action="store_true")
     replay_parser.add_argument("--top", type=int, default=10)
     replay_parser.add_argument("--reference-low", type=float)
     replay_parser.add_argument("--reference-high", type=float)
@@ -827,12 +1074,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     cfg = load_flat_config(args.config, args.override)
     if args.command == "cache":
         output_path = args.output_cache.resolve()
-        if output_path.exists() and not args.force:
-            raise FileExistsError(
-                "Output cache already exists; use a new path or --force: {}".format(
-                    output_path
-                )
+        _validate_expected_video_count(args.expected_video_count)
+        _require_distinct_paths(
+            (
+                ("config", args.config),
+                ("checkpoint", args.checkpoint),
+                ("output-cache", output_path),
             )
+        )
+        _require_outputs_available((("output-cache", output_path),), args.force)
         payload = build_raw_cache(
             args.checkpoint,
             output_path,
@@ -847,8 +1097,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("events:", payload["metadata"]["event_count"])
         return 0
 
-    primary = load_cache(args.primary_cache)
-    secondary = load_cache(args.secondary_cache) if args.secondary_cache else None
+    _require_distinct_paths(
+        (
+            ("config", args.config),
+            ("primary-cache", args.primary_cache),
+            ("secondary-cache", args.secondary_cache),
+            ("output-json", args.output_json),
+            ("output-csv", args.output_csv),
+        )
+    )
+    _require_outputs_available(
+        (("output-json", args.output_json), ("output-csv", args.output_csv)),
+        args.force,
+    )
+    expected = parse_expected_metrics(args.expect_metric)
+    if expected and (args.reference_low is None or args.reference_high is None):
+        raise ValueError(
+            "--expect-metric requires --reference-low and --reference-high."
+        )
+
+    primary, primary_cache_sha256 = load_cache_snapshot(args.primary_cache)
+    if args.secondary_cache:
+        secondary, secondary_cache_sha256 = load_cache_snapshot(args.secondary_cache)
+    else:
+        secondary = None
+        secondary_cache_sha256 = None
+    checkpoint_paths = []
+    for cache_name, payload in (("primary", primary), ("secondary", secondary)):
+        if payload is None:
+            continue
+        checkpoint_path = payload["metadata"].get("checkpoint_path")
+        if checkpoint_path:
+            checkpoint_paths.append((cache_name + "-checkpoint", Path(checkpoint_path)))
+    _require_distinct_paths(
+        tuple(checkpoint_paths)
+        + (("output-json", args.output_json), ("output-csv", args.output_csv))
+    )
     records = route_cache_records(primary, secondary, args.secondary_max_events)
     low_thresholds = decimal_grid(args.low_min, args.low_max, args.threshold_step)
     high_thresholds = decimal_grid(args.high_min, args.high_max, args.threshold_step)
@@ -859,25 +1143,57 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         high_thresholds,
         cfg,
     )
+    reference = None
+    if expected:
+        reference = _find_pair(results, args.reference_low, args.reference_high)
+        # A failed golden-baseline check must not leave files that look like a
+        # successful replay.  Verify before either output is created/replaced.
+        verify_formatted_metrics(reference, expected)
+
     routed_secondary = sum(record.score_source == "secondary" for record in records)
+    project_root = Path(__file__).resolve().parent
     output_payload = {
-        "tool_schema": "evc-temporal-memory-replay-results-v1",
+        "tool_schema": "evc-temporal-memory-replay-results-v2",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "primary_cache": str(args.primary_cache.resolve()),
+        "primary_cache_sha256": primary_cache_sha256,
         "primary_checkpoint_sha256": primary["metadata"]["checkpoint_sha256"],
         "secondary_cache": str(args.secondary_cache.resolve()) if args.secondary_cache else None,
+        "secondary_cache_sha256": secondary_cache_sha256,
         "secondary_checkpoint_sha256": (
             secondary["metadata"]["checkpoint_sha256"] if secondary else None
         ),
         "secondary_max_events": int(args.secondary_max_events),
         "secondary_routed_videos": routed_secondary,
+        "dataset_split": "val",
         "dataset_signature": primary["metadata"]["dataset_signature"],
+        "video_count": len(records),
+        "event_count": sum(record.event_count for record in records),
+        "inference_settings": dict(primary["metadata"]["inference_settings"]),
         "density_cutoff": int(args.density_cutoff),
         "low_thresholds": list(low_thresholds),
         "high_thresholds": list(high_thresholds),
         "postprocess": _postprocess_settings(cfg),
+        "evaluation": _evaluation_settings(cfg),
+        "replay_code_sha256": _code_provenance(
+            project_root, REPLAY_CODE_PROVENANCE_PATHS
+        ),
         "config_path": str(Path(args.config).resolve()),
         "config_overrides": list(args.override),
+        "reference_verification": (
+            {
+                "low_threshold": float(args.reference_low),
+                "high_threshold": float(args.reference_high),
+                "expected": expected,
+                "matched_test2_display": True,
+            }
+            if expected
+            else None
+        ),
+        "selection_note": (
+            "Threshold pairs are ranked on the same labeled validation split; "
+            "the best row is validation-tuned and is not an independent estimate."
+        ),
         "results": results,
     }
     _write_json(args.output_json, output_payload)
@@ -898,15 +1214,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 result["fa"],
             )
         )
+    print(
+        "selection note: grid ranking uses labeled val and is not an independent score"
+    )
 
-    expected = parse_expected_metrics(args.expect_metric)
     if expected:
-        if args.reference_low is None or args.reference_high is None:
-            raise ValueError(
-                "--expect-metric requires --reference-low and --reference-high."
-            )
-        reference = _find_pair(results, args.reference_low, args.reference_high)
-        verify_formatted_metrics(reference, expected)
         print(
             "reference pair low={:.3f} high={:.3f}: test2 display matches".format(
                 args.reference_low, args.reference_high

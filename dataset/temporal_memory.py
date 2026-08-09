@@ -92,6 +92,25 @@ def normalize_density_bucket_config(boundaries=None, views=None):
     return boundaries, views
 
 
+def normalize_min_event_count_exclusive(value):
+    """Normalize an optional strict lower event-count filter."""
+    if value is None:
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError('min_event_count_exclusive must be an integer or null.')
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(
+            'min_event_count_exclusive must be an integer or null.'
+        ) from error
+    if normalized != value:
+        raise ValueError('min_event_count_exclusive must be an integer or null.')
+    if normalized < 0:
+        raise ValueError('min_event_count_exclusive must not be negative.')
+    return normalized
+
+
 def temporal_memory_views_by_video(
     event_counts,
     views_per_video,
@@ -195,6 +214,7 @@ class TemporalMemoryTrainDataset(Dataset):
         dense_view_multiplier=2,
         density_bucket_boundaries=None,
         density_bucket_views=None,
+        min_event_count_exclusive=None,
     ):
         self.root = Path(root)
         self.whole_t = int(whole_t)
@@ -212,6 +232,9 @@ class TemporalMemoryTrainDataset(Dataset):
         self.dense_sampling_enabled = bool(dense_sampling_enabled)
         self.dense_event_count_cutoff = int(dense_event_count_cutoff)
         self.dense_view_multiplier = int(dense_view_multiplier)
+        self.min_event_count_exclusive = normalize_min_event_count_exclusive(
+            min_event_count_exclusive
+        )
         (
             self.density_bucket_boundaries,
             self.density_bucket_views,
@@ -224,9 +247,37 @@ class TemporalMemoryTrainDataset(Dataset):
         )
         self.current_epoch = 0
 
-        self.file_paths = sorted(self.root.glob('*.npz'))
-        if not self.file_paths:
+        all_file_paths = sorted(self.root.glob('*.npz'))
+        if not all_file_paths:
             raise RuntimeError('No npz files found in {}'.format(self.root))
+        self.source_video_count = len(all_file_paths)
+        self.source_video_indices = np.arange(
+            self.source_video_count,
+            dtype=np.int64,
+        )
+        filtered_event_counts = None
+        if self.min_event_count_exclusive is None:
+            self.file_paths = all_file_paths
+        else:
+            all_event_counts = np.asarray(
+                [npz_event_count(path) for path in all_file_paths],
+                dtype=np.int64,
+            )
+            retained = all_event_counts > self.min_event_count_exclusive
+            self.file_paths = [
+                path
+                for path, keep in zip(all_file_paths, retained)
+                if bool(keep)
+            ]
+            self.source_video_indices = self.source_video_indices[retained]
+            filtered_event_counts = all_event_counts[retained]
+            if not self.file_paths:
+                raise RuntimeError(
+                    'Event-count filter >{} retained no npz files in {}.'.format(
+                        self.min_event_count_exclusive,
+                        self.root,
+                    )
+                )
         if self.context_bins < 1 or self.context_bins % 2 == 0:
             raise ValueError('context_bins must be a positive odd integer.')
         if self.sequence_length <= 0:
@@ -258,7 +309,9 @@ class TemporalMemoryTrainDataset(Dataset):
             self.dense_sampling_enabled
             or self.density_bucket_sampling_enabled
         )
-        if needs_event_counts:
+        if filtered_event_counts is not None:
+            self.event_counts_by_video = filtered_event_counts
+        elif needs_event_counts:
             if self.cache_all_videos:
                 self.event_counts_by_video = np.asarray(
                     [
@@ -371,9 +424,14 @@ class TemporalMemoryTrainDataset(Dataset):
             mode = 'uniform'
         return {
             'mode': mode,
+            'source_video_count': self.source_video_count,
             'video_count': len(self.file_paths),
+            'excluded_video_count': (
+                self.source_video_count - len(self.file_paths)
+            ),
             'sequence_count': len(self),
             'views_per_video': self.views_per_video,
+            'min_event_count_exclusive': self.min_event_count_exclusive,
             'dense_event_count_cutoff': self.dense_event_count_cutoff,
             'dense_view_multiplier': self.dense_view_multiplier,
             'dense_video_count': self.dense_video_count,
@@ -392,10 +450,11 @@ class TemporalMemoryTrainDataset(Dataset):
         }
 
     def _sample_center_bin(self, video_index, view_index, video):
+        source_video_index = int(self.source_video_indices[int(video_index)])
         seed = (
             self.random_seed
             + 1000003 * self.current_epoch
-            + 1009 * video_index
+            + 1009 * source_video_index
             + view_index
         )
         rng = np.random.default_rng(seed)

@@ -57,6 +57,8 @@ def make_config():
             'temporal_memory_sequence_length': 16,
             'temporal_memory_train_views_per_video': 2,
             'temporal_memory_freeze_base_enabled': False,
+            'temporal_memory_head_only_enabled': False,
+            'temporal_memory_train_min_event_count_exclusive': None,
         },
     }
     return SimpleNamespace(
@@ -70,6 +72,8 @@ def make_config():
         temporal_frame_confidence_head_enabled=False,
         temporal_memory_confidence_only_enabled=False,
         temporal_memory_freeze_base_enabled=False,
+        temporal_memory_head_only_enabled=False,
+        temporal_memory_train_min_event_count_exclusive=None,
         temporal_memory_temporal_attention_enabled=True,
         resolved_config=resolved_config,
         config_overrides=['TRAIN.epochs=8'],
@@ -119,6 +123,18 @@ class TemporalMemoryResumeTests(unittest.TestCase):
                 'TEMPORAL_MEMORY',
                 'temporal_memory_freeze_base_enabled',
                 True,
+            ),
+            (
+                'TEMPORAL_MEMORY.temporal_memory_head_only_enabled',
+                'TEMPORAL_MEMORY',
+                'temporal_memory_head_only_enabled',
+                True,
+            ),
+            (
+                'TEMPORAL_MEMORY.temporal_memory_train_min_event_count_exclusive',
+                'TEMPORAL_MEMORY',
+                'temporal_memory_train_min_event_count_exclusive',
+                30000,
             ),
         )
         for expected_path, section, key, value in changes:
@@ -193,6 +209,7 @@ class TemporalMemoryResumeTests(unittest.TestCase):
         self.assertFalse(
             checkpoint['temporal_memory']['freeze_base_enabled']
         )
+        self.assertFalse(checkpoint['temporal_memory']['head_only_enabled'])
         self.assertEqual(
             checkpoint['provenance']['training_scope'],
             {
@@ -271,11 +288,14 @@ class TemporalMemoryResumeTests(unittest.TestCase):
                     current_config=make_config(),
                 )
 
-    def test_legacy_resolved_config_treats_missing_freeze_flag_as_false(self):
+    def test_legacy_resolved_config_treats_missing_scope_defaults_as_disabled(self):
         saved_config = make_config()
-        del saved_config.resolved_config['TEMPORAL_MEMORY'][
-            'temporal_memory_freeze_base_enabled'
-        ]
+        for key in (
+            'temporal_memory_freeze_base_enabled',
+            'temporal_memory_head_only_enabled',
+            'temporal_memory_train_min_event_count_exclusive',
+        ):
+            del saved_config.resolved_config['TEMPORAL_MEMORY'][key]
         checkpoint = {
             'provenance': {
                 'resolved_config': copy.deepcopy(saved_config.resolved_config)

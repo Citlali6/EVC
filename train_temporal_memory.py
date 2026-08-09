@@ -1,5 +1,6 @@
 """Train a bidirectional full-stream temporal-memory event segmentation model."""
 
+import hashlib
 import json
 import os
 import random
@@ -44,7 +45,21 @@ LEGACY_RESUME_CONFIG_DEFAULTS = {
         'TEMPORAL_MEMORY',
         'temporal_memory_freeze_base_enabled',
     ): False,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_head_only_enabled',
+    ): False,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_train_min_event_count_exclusive',
+    ): None,
 }
+HEAD_ONLY_MUTABLE_STATE_KEYS = frozenset(
+    {
+        'base.head.weight',
+        'base.head.bias',
+    }
+)
 
 
 def load_checkpoint_file(path, map_location='cpu'):
@@ -58,6 +73,154 @@ def load_checkpoint_file(path, map_location='cpu'):
     except TypeError:
         # PyTorch releases predating the ``weights_only`` argument.
         return torch.load(path, map_location=map_location)
+
+
+def resolve_temporal_memory_training_scope(
+    confidence_only_enabled=False,
+    freeze_base_enabled=False,
+    head_only_enabled=False,
+):
+    """Resolve the mutually exclusive temporal-memory training scope."""
+    enabled = [
+        name
+        for name, active in (
+            ('confidence_only', confidence_only_enabled),
+            ('memory_only', freeze_base_enabled),
+            ('event_head_only', head_only_enabled),
+        )
+        if bool(active)
+    ]
+    if len(enabled) > 1:
+        raise ValueError(
+            'Temporal-memory confidence-only, freeze-base, and head-only '
+            'modes are mutually exclusive: {}.'.format(', '.join(enabled))
+        )
+    return enabled[0] if enabled else 'all'
+
+
+def validate_head_only_training_config(config, training_scope):
+    """Reject settings that would make the H17 probe ambiguous."""
+    if training_scope != 'event_head_only':
+        return
+    if bool(getattr(config, 'temporal_frame_confidence_head_enabled', False)):
+        raise ValueError(
+            'Head-only mode requires TEMPORAL_FRAME.confidence_head_enabled=false.'
+        )
+    if int(config.temporal_memory_train_views_per_video) != 1:
+        raise ValueError('Head-only mode requires exactly one view per video.')
+    if getattr(
+        config,
+        'temporal_memory_train_min_event_count_exclusive',
+        None,
+    ) is None:
+        raise ValueError(
+            'Head-only mode requires a strict train event-count filter.'
+        )
+    if bool(
+        getattr(config, 'temporal_memory_dense_sampling_enabled', False)
+    ):
+        raise ValueError('Head-only mode does not allow dense multiplier sampling.')
+    if list(
+        getattr(config, 'temporal_memory_density_bucket_boundaries', [])
+    ) or list(getattr(config, 'temporal_memory_density_bucket_views', [])):
+        raise ValueError('Head-only mode does not allow density bucket sampling.')
+    if bool(getattr(config, 'temporal_memory_metric_aux_enabled', False)):
+        raise ValueError('Head-only mode requires metric auxiliary loss disabled.')
+    if bool(
+        getattr(
+            config,
+            'temporal_frame_trajectory_extrapolation_enabled',
+            False,
+        )
+    ):
+        raise ValueError('Head-only mode requires trajectory loss disabled.')
+
+
+def _state_tensor_byte_view(tensor):
+    return (
+        tensor.detach()
+        .cpu()
+        .contiguous()
+        .reshape(-1)
+        .view(torch.uint8)
+    )
+
+
+def snapshot_frozen_model_state(
+    model,
+    mutable_state_keys=HEAD_ONLY_MUTABLE_STATE_KEYS,
+):
+    """Clone every state tensor outside the explicitly mutable set."""
+    mutable_state_keys = frozenset(mutable_state_keys)
+    state = model.state_dict()
+    missing = sorted(mutable_state_keys.difference(state))
+    if missing:
+        raise ValueError(
+            'Mutable state keys are missing from the model: {}.'.format(missing)
+        )
+    return {
+        name: tensor.detach().cpu().contiguous().clone()
+        for name, tensor in state.items()
+        if name not in mutable_state_keys
+    }
+
+
+def frozen_model_state_sha256(
+    model_or_state,
+    mutable_state_keys=HEAD_ONLY_MUTABLE_STATE_KEYS,
+):
+    """Hash frozen state names, metadata, and exact tensor bytes."""
+    state = (
+        model_or_state.state_dict()
+        if hasattr(model_or_state, 'state_dict')
+        else model_or_state
+    )
+    mutable_state_keys = frozenset(mutable_state_keys)
+    digest = hashlib.sha256()
+    for name in sorted(state):
+        if name in mutable_state_keys:
+            continue
+        tensor = state[name].detach().cpu().contiguous()
+        digest.update(name.encode('utf-8'))
+        digest.update(str(tensor.dtype).encode('ascii'))
+        digest.update(str(tuple(tensor.shape)).encode('ascii'))
+        digest.update(_state_tensor_byte_view(tensor).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def assert_frozen_model_state_unchanged(
+    model,
+    reference_state,
+    mutable_state_keys=HEAD_ONLY_MUTABLE_STATE_KEYS,
+):
+    """Fail before checkpointing if head-only training changed frozen state."""
+    mutable_state_keys = frozenset(mutable_state_keys)
+    current = model.state_dict()
+    expected_names = set(reference_state)
+    current_names = set(current).difference(mutable_state_keys)
+    if current_names != expected_names:
+        raise RuntimeError(
+            'Frozen model state keys changed: missing={}, extra={}.'.format(
+                sorted(expected_names.difference(current_names)),
+                sorted(current_names.difference(expected_names)),
+            )
+        )
+    for name in sorted(reference_state):
+        expected = reference_state[name]
+        actual = current[name]
+        if actual.dtype != expected.dtype or tuple(actual.shape) != tuple(
+            expected.shape
+        ):
+            raise RuntimeError(
+                'Head-only training changed frozen state metadata: {}.'.format(name)
+            )
+        if not torch.equal(
+            _state_tensor_byte_view(actual),
+            _state_tensor_byte_view(expected),
+        ):
+            raise RuntimeError(
+                'Head-only training modified frozen state tensor: {}.'.format(name)
+            )
 
 
 def capture_rng_state(include_cuda=True):
@@ -239,6 +402,7 @@ def build_training_checkpoint(
     best_loss_checkpoint=None,
     git_provenance=None,
     include_cuda_rng=True,
+    frozen_state_reference_sha256=None,
 ):
     """Build an epoch-boundary snapshot that can resume deterministically."""
     freeze_base_enabled = bool(
@@ -246,6 +410,14 @@ def build_training_checkpoint(
     )
     confidence_only_enabled = bool(
         getattr(config, 'temporal_memory_confidence_only_enabled', False)
+    )
+    head_only_enabled = bool(
+        getattr(config, 'temporal_memory_head_only_enabled', False)
+    )
+    training_scope = resolve_temporal_memory_training_scope(
+        confidence_only_enabled=confidence_only_enabled,
+        freeze_base_enabled=freeze_base_enabled,
+        head_only_enabled=head_only_enabled,
     )
     trainable_parameter_count = sum(
         parameter.numel()
@@ -257,6 +429,24 @@ def build_training_checkpoint(
         for parameter in model.parameters()
         if not parameter.requires_grad
     )
+    training_scope_metadata = {
+        'name': training_scope,
+        'trainable_parameter_count': int(trainable_parameter_count),
+        'frozen_parameter_count': int(frozen_parameter_count),
+    }
+    if training_scope == 'event_head_only':
+        if not frozen_state_reference_sha256:
+            raise ValueError(
+                'Head-only checkpoints require a frozen-state reference hash.'
+            )
+        training_scope_metadata.update(
+            {
+                'mutable_state_keys': sorted(HEAD_ONLY_MUTABLE_STATE_KEYS),
+                'frozen_state_reference_sha256': str(
+                    frozen_state_reference_sha256
+                ),
+            }
+        )
     return {
         'checkpoint_format_version': RESUME_CHECKPOINT_FORMAT_VERSION,
         'model_state_dict': model.state_dict(),
@@ -307,6 +497,7 @@ def build_training_checkpoint(
             'freeze_base_enabled': bool(
                 freeze_base_enabled
             ),
+            'head_only_enabled': bool(head_only_enabled),
             'temporal_attention_enabled': bool(
                 getattr(
                     config,
@@ -330,17 +521,7 @@ def build_training_checkpoint(
                 else str(Path(resume_parent_checkpoint).resolve())
             ),
             'git': git_provenance or {'commit': None, 'dirty': None},
-            'training_scope': {
-                'name': (
-                    'confidence_only'
-                    if confidence_only_enabled
-                    else 'memory_only'
-                    if freeze_base_enabled
-                    else 'all'
-                ),
-                'trainable_parameter_count': int(trainable_parameter_count),
-                'frozen_parameter_count': int(frozen_parameter_count),
-            },
+            'training_scope': training_scope_metadata,
         },
     }
 
@@ -405,6 +586,37 @@ def load_training_resume(
             'configured {}.'.format(saved_group_names, current_group_names)
         )
     model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+    if bool(
+        getattr(current_config, 'temporal_memory_head_only_enabled', False)
+    ):
+        training_scope = checkpoint.get('provenance', {}).get(
+            'training_scope',
+            {},
+        )
+        if training_scope.get('name') != 'event_head_only':
+            raise ValueError(
+                'Head-only resume checkpoint is missing its training scope.'
+            )
+        mutable_state_keys = frozenset(
+            training_scope.get('mutable_state_keys', [])
+        )
+        if mutable_state_keys != HEAD_ONLY_MUTABLE_STATE_KEYS:
+            raise ValueError(
+                'Head-only resume checkpoint has unexpected mutable state keys.'
+            )
+        reference_sha256 = training_scope.get(
+            'frozen_state_reference_sha256'
+        )
+        if not reference_sha256:
+            raise ValueError(
+                'Head-only resume checkpoint is missing its frozen-state hash.'
+            )
+        actual_sha256 = frozen_model_state_sha256(model)
+        if actual_sha256 != reference_sha256:
+            raise ValueError(
+                'Head-only resume checkpoint frozen state does not match its '
+                'recorded reference hash.'
+            )
     try:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     except (ValueError, KeyError) as error:
@@ -613,20 +825,34 @@ def load_p23_base_weights(
     return checkpoint_path
 
 
+def validate_head_only_initialization_checkpoint(checkpoint_path):
+    """Require a complete temporal-memory parent for the H17 probe."""
+    checkpoint = load_checkpoint_file(checkpoint_path, map_location='cpu')
+    if not isinstance(checkpoint.get('temporal_memory'), dict):
+        raise ValueError(
+            'Head-only mode requires a complete temporal-memory checkpoint.'
+        )
+    state = checkpoint.get('model_state_dict', {})
+    missing = sorted(HEAD_ONLY_MUTABLE_STATE_KEYS.difference(state))
+    if missing:
+        raise ValueError(
+            'Head-only initialization checkpoint is missing: {}.'.format(missing)
+        )
+
+
 def configure_temporal_memory_trainable_parameters(
     model,
     confidence_only_enabled=False,
     freeze_base_enabled=False,
+    head_only_enabled=False,
 ):
     """Apply an explicit, checkpoint-neutral temporal training scope."""
-    confidence_only_enabled = bool(confidence_only_enabled)
-    freeze_base_enabled = bool(freeze_base_enabled)
-    if confidence_only_enabled and freeze_base_enabled:
-        raise ValueError(
-            'Temporal-memory confidence-only and freeze-base modes are '
-            'mutually exclusive.'
-        )
-    if confidence_only_enabled:
+    training_scope = resolve_temporal_memory_training_scope(
+        confidence_only_enabled=confidence_only_enabled,
+        freeze_base_enabled=freeze_base_enabled,
+        head_only_enabled=head_only_enabled,
+    )
+    if training_scope == 'confidence_only':
         if not model.confidence_head_enabled:
             raise ValueError(
                 'Confidence-only mode requires the confidence head to be enabled.'
@@ -636,26 +862,70 @@ def configure_temporal_memory_trainable_parameters(
         }
         for parameter in model.parameters():
             parameter.requires_grad_(id(parameter) in confidence_parameter_ids)
-    elif freeze_base_enabled:
+    elif training_scope == 'memory_only':
         model.base.requires_grad_(False)
+    elif training_scope == 'event_head_only':
+        head_parameter_ids = {
+            id(parameter) for parameter in model.base.head.parameters()
+        }
+        for parameter in model.parameters():
+            parameter.requires_grad_(id(parameter) in head_parameter_ids)
+        trainable_names = {
+            name
+            for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        }
+        if trainable_names != HEAD_ONLY_MUTABLE_STATE_KEYS:
+            raise RuntimeError(
+                'Head-only trainable parameters are {} instead of {}.'.format(
+                    sorted(trainable_names),
+                    sorted(HEAD_ONLY_MUTABLE_STATE_KEYS),
+                )
+            )
+        trainable_count = sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        )
+        if trainable_count != 17:
+            raise RuntimeError(
+                'Head-only mode expected 17 trainable parameters, got {}.'.format(
+                    trainable_count
+                )
+            )
 
 
 def set_temporal_memory_training_mode(
     model,
     confidence_only_enabled=False,
     freeze_base_enabled=False,
+    head_only_enabled=False,
 ):
     """Set module modes without re-enabling a frozen base at each epoch."""
-    if bool(confidence_only_enabled):
+    training_scope = resolve_temporal_memory_training_scope(
+        confidence_only_enabled=confidence_only_enabled,
+        freeze_base_enabled=freeze_base_enabled,
+        head_only_enabled=head_only_enabled,
+    )
+    if training_scope == 'confidence_only':
         model.eval()
         model.base.confidence_head.train()
         return
+    if training_scope == 'event_head_only':
+        model.eval()
+        model.base.head.train()
+        return
     model.train()
-    if bool(freeze_base_enabled):
+    if training_scope == 'memory_only':
         model.base.eval()
 
 
-def build_optimizer(model, config, confidence_only_enabled=False):
+def build_optimizer(
+    model,
+    config,
+    confidence_only_enabled=False,
+    head_only_enabled=False,
+):
     base_multiplier = float(config.temporal_memory_base_lr_multiplier)
     memory_multiplier = float(config.temporal_memory_memory_lr_multiplier)
     confidence_multiplier = float(
@@ -667,6 +937,32 @@ def build_optimizer(model, config, confidence_only_enabled=False):
         or confidence_multiplier <= 0.0
     ):
         raise ValueError('Temporal-memory learning-rate multipliers must be positive.')
+    resolve_temporal_memory_training_scope(
+        confidence_only_enabled=confidence_only_enabled,
+        head_only_enabled=head_only_enabled,
+    )
+    if bool(head_only_enabled):
+        head_parameters = [
+            parameter
+            for parameter in model.base.head.parameters()
+            if parameter.requires_grad
+        ]
+        if len(head_parameters) != 2 or sum(
+            parameter.numel() for parameter in head_parameters
+        ) != 17:
+            raise RuntimeError(
+                'Head-only optimizer requires exactly two tensors and 17 parameters.'
+            )
+        return optim.AdamW(
+            [
+                {
+                    'name': 'event_head',
+                    'params': head_parameters,
+                    'lr': float(config.lr),
+                }
+            ],
+            weight_decay=0.0,
+        )
     confidence_parameters = []
     if model.confidence_head_enabled:
         confidence_parameters = [
@@ -754,7 +1050,8 @@ def memory_config_summary(config):
         'target_positive_loss_mass={}, max_positive_weight={}, '
         'base_lr_multiplier={}, memory_lr_multiplier={}, '
         'confidence_lr_multiplier={}, '
-        'attention_enabled={}, freeze_base_enabled={})'
+        'attention_enabled={}, freeze_base_enabled={}, head_only_enabled={}, '
+        'min_event_count_exclusive={})'
     ).format(
         config.temporal_memory_bin_size,
         config.temporal_memory_context_bins,
@@ -769,6 +1066,12 @@ def memory_config_summary(config):
         getattr(config, 'temporal_memory_confidence_lr_multiplier', 1.0),
         bool(getattr(config, 'temporal_memory_temporal_attention_enabled', False)),
         bool(getattr(config, 'temporal_memory_freeze_base_enabled', False)),
+        bool(getattr(config, 'temporal_memory_head_only_enabled', False)),
+        getattr(
+            config,
+            'temporal_memory_train_min_event_count_exclusive',
+            None,
+        ),
     )
 
 
@@ -803,6 +1106,30 @@ if __name__ == '__main__':
         )
     if int(cfg.epochs) <= 0:
         raise ValueError('TRAIN.epochs must be positive.')
+
+    confidence_head_enabled = bool(
+        getattr(cfg, 'temporal_frame_confidence_head_enabled', False)
+    )
+    confidence_only_enabled = bool(
+        getattr(cfg, 'temporal_memory_confidence_only_enabled', False)
+    )
+    freeze_base_enabled = bool(
+        getattr(cfg, 'temporal_memory_freeze_base_enabled', False)
+    )
+    head_only_enabled = bool(
+        getattr(cfg, 'temporal_memory_head_only_enabled', False)
+    )
+    training_scope = resolve_temporal_memory_training_scope(
+        confidence_only_enabled=confidence_only_enabled,
+        freeze_base_enabled=freeze_base_enabled,
+        head_only_enabled=head_only_enabled,
+    )
+    if confidence_only_enabled and not confidence_head_enabled:
+        raise ValueError(
+            'TEMPORAL_MEMORY.confidence_only_enabled requires '
+            'TEMPORAL_FRAME.confidence_head_enabled=true.'
+        )
+    validate_head_only_training_config(cfg, training_scope)
 
     resume_checkpoint_value = str(
         getattr(cfg, 'resume_checkpoint', '')
@@ -854,6 +1181,11 @@ if __name__ == '__main__':
             cfg,
             'temporal_memory_density_bucket_views',
             [],
+        ),
+        min_event_count_exclusive=getattr(
+            cfg,
+            'temporal_memory_train_min_event_count_exclusive',
+            None,
         ),
     )
     dataloader = torch.utils.data.DataLoader(
@@ -988,25 +1320,6 @@ if __name__ == '__main__':
     checkpoint_interval = int(getattr(cfg, 'checkpoint_interval', 0))
     if checkpoint_interval < 0:
         raise ValueError('TRAIN.checkpoint_interval must be non-negative.')
-    confidence_head_enabled = bool(
-        getattr(cfg, 'temporal_frame_confidence_head_enabled', False)
-    )
-    confidence_only_enabled = bool(
-        getattr(cfg, 'temporal_memory_confidence_only_enabled', False)
-    )
-    freeze_base_enabled = bool(
-        getattr(cfg, 'temporal_memory_freeze_base_enabled', False)
-    )
-    if confidence_only_enabled and not confidence_head_enabled:
-        raise ValueError(
-            'TEMPORAL_MEMORY.confidence_only_enabled requires '
-            'TEMPORAL_FRAME.confidence_head_enabled=true.'
-        )
-    if confidence_only_enabled and freeze_base_enabled:
-        raise ValueError(
-            'TEMPORAL_MEMORY.confidence_only_enabled and '
-            'TEMPORAL_MEMORY.freeze_base_enabled are mutually exclusive.'
-        )
     confidence_calibration_weight = float(
         getattr(cfg, 'temporal_frame_confidence_calibration_weight', 0.1)
     )
@@ -1034,17 +1347,32 @@ if __name__ == '__main__':
             density_calibration_enabled=density_calibration_enabled,
             confidence_head_enabled=confidence_head_enabled,
         )
+        if head_only_enabled:
+            validate_head_only_initialization_checkpoint(initialized_from)
     configure_temporal_memory_trainable_parameters(
         model,
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
+        head_only_enabled=head_only_enabled,
     )
-    optimizer = build_optimizer(model, cfg, confidence_only_enabled)
+    optimizer = build_optimizer(
+        model,
+        cfg,
+        confidence_only_enabled=confidence_only_enabled,
+        head_only_enabled=head_only_enabled,
+    )
+    optimizer_parameters = [
+        parameter
+        for group in optimizer.param_groups
+        for parameter in group['params']
+    ]
     scheduler = build_scheduler(optimizer, cfg)
     start_epoch = 0
     best_loss = float('inf')
     best_epoch = None
     best_loss_checkpoint = None
+    frozen_state_reference = None
+    frozen_state_reference_sha256 = None
     if resume_parent_checkpoint is not None:
         resumed, start_epoch = load_training_resume(
             resume_parent_checkpoint,
@@ -1065,6 +1393,21 @@ if __name__ == '__main__':
             raise ValueError(
                 'Resume checkpoint starts at epoch {}, beyond configured '
                 'TRAIN.epochs={}.'.format(start_epoch, cfg.epochs)
+            )
+    if head_only_enabled:
+        if resume_parent_checkpoint is None:
+            frozen_state_reference_sha256 = frozen_model_state_sha256(model)
+        else:
+            frozen_state_reference_sha256 = resumed['provenance'][
+                'training_scope'
+            ]['frozen_state_reference_sha256']
+        frozen_state_reference = snapshot_frozen_model_state(model)
+        if (
+            frozen_model_state_sha256(frozen_state_reference, mutable_state_keys=())
+            != frozen_state_reference_sha256
+        ):
+            raise RuntimeError(
+                'Head-only frozen-state snapshot does not match its reference hash.'
             )
 
     print('random seed:{}'.format(cfg.seed))
@@ -1111,6 +1454,11 @@ if __name__ == '__main__':
         print('target-time coverage loss: disabled')
     if confidence_only_enabled:
         print('confidence calibration mode: backbone and memory frozen')
+    if head_only_enabled:
+        print(
+            'event-head-only mode: 17 parameters trainable; frozen state sha256:',
+            frozen_state_reference_sha256,
+        )
 
     last_checkpoint_path = (
         resume_parent_checkpoint
@@ -1123,6 +1471,7 @@ if __name__ == '__main__':
             model,
             confidence_only_enabled=confidence_only_enabled,
             freeze_base_enabled=freeze_base_enabled,
+            head_only_enabled=head_only_enabled,
         )
         loss_sum = 0.0
         positive_fraction_sum = 0.0
@@ -1280,7 +1629,7 @@ if __name__ == '__main__':
                 )
                 loss = loss + trajectory_weight * trajectory_loss
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+            torch.nn.utils.clip_grad_norm_(optimizer_parameters, max_norm=5.0)
             optimizer.step()
 
             loss_sum += float(loss.detach().item())
@@ -1329,6 +1678,15 @@ if __name__ == '__main__':
         scheduler.step()
 
         epoch_loss = loss_sum / max(batch_count, 1)
+        if head_only_enabled:
+            assert_frozen_model_state_unchanged(
+                model,
+                frozen_state_reference,
+            )
+            if frozen_model_state_sha256(model) != frozen_state_reference_sha256:
+                raise RuntimeError(
+                    'Head-only frozen-state hash changed before checkpointing.'
+                )
         is_best = epoch_loss < best_loss
         if is_best:
             best_loss = epoch_loss
@@ -1350,6 +1708,7 @@ if __name__ == '__main__':
             run_start_epoch=start_epoch,
             best_loss_checkpoint=best_loss_checkpoint,
             git_provenance=git_provenance,
+            frozen_state_reference_sha256=frozen_state_reference_sha256,
         )
         if is_best:
             save_checkpoint(
@@ -1389,6 +1748,8 @@ if __name__ == '__main__':
                 )
             )
 
+    if head_only_enabled:
+        assert_frozen_model_state_unchanged(model, frozen_state_reference)
     summary = {
         'started_at': started_at.isoformat(timespec='seconds'),
         'seed': int(cfg.seed),
@@ -1415,6 +1776,9 @@ if __name__ == '__main__':
             else str(resume_parent_checkpoint)
         ),
         'git': git_provenance,
+        'training_scope': training_scope,
+        'frozen_state_reference_sha256': frozen_state_reference_sha256,
+        'sampling': dataset.sampling_summary(),
         'resolved_config': cfg.resolved_config,
         'config_overrides': list(cfg.config_overrides),
     }

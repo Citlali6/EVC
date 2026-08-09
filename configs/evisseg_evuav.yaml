@@ -255,6 +255,7 @@ TEMPORAL_MEMORY:
   temporal_memory_width: 16
   temporal_memory_sequence_length: 16
   temporal_memory_train_views_per_video: 2
+  temporal_memory_train_min_event_count_exclusive: null
   temporal_memory_positive_frame_probability: 0.75
   temporal_memory_target_positive_loss_mass: 0.20
   temporal_memory_max_positive_weight: 16.0
@@ -316,4 +317,6 @@ TEMPORAL_MEMORY:
   # M25: keep the released frame backbone, density calibrator, and output head
   # byte-stable while updating only the bidirectional memory modules.
   temporal_memory_freeze_base_enabled: false
+  # H17: train only the released event output head (16 weights + one bias).
+  temporal_memory_head_only_enabled: false
   temporal_memory_temporal_attention_enabled: false

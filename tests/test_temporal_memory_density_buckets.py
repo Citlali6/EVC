@@ -120,9 +120,12 @@ class DensityBucketDatasetTest(unittest.TestCase):
                 dataset.sampling_summary(),
                 {
                     'mode': 'density_buckets',
+                    'source_video_count': 3,
                     'video_count': 3,
+                    'excluded_video_count': 0,
                     'sequence_count': 8,
                     'views_per_video': 2,
+                    'min_event_count_exclusive': None,
                     'dense_event_count_cutoff': 200000,
                     'dense_view_multiplier': 2,
                     'dense_video_count': 0,

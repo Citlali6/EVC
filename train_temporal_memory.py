@@ -20,6 +20,14 @@ from dataset.temporal_memory import (
     temporal_memory_collate,
 )
 from model.modules.confidence_head import confidence_calibration_loss
+from model.temporal_frame_net import (
+    DENSITY_CALIBRATION_LEGACY_VERSION,
+    DENSITY_CALIBRATION_V2_BASIS,
+    DENSITY_CALIBRATION_V2_RESIDUAL_SCALE,
+    DENSITY_CALIBRATION_V2_VERSION,
+    density_calibration_version,
+    validate_density_calibration_metadata,
+)
 from model.temporal_memory_net import BidirectionalTemporalMemoryNet
 from utils.component_hard_negative import (
     component_hard_negative_loss,
@@ -53,11 +61,28 @@ LEGACY_RESUME_CONFIG_DEFAULTS = {
         'TEMPORAL_MEMORY',
         'temporal_memory_train_min_event_count_exclusive',
     ): None,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_dacc_v2_enabled',
+    ): False,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_dacc_v2_only_enabled',
+    ): False,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_dacc_v2_lr_multiplier',
+    ): 1.0,
 }
 HEAD_ONLY_MUTABLE_STATE_KEYS = frozenset(
     {
         'base.head.weight',
         'base.head.bias',
+    }
+)
+DACC_V2_MUTABLE_STATE_KEYS = frozenset(
+    {
+        'base.density_calibrator.residual_projection.weight',
     }
 )
 
@@ -75,10 +100,23 @@ def load_checkpoint_file(path, map_location='cpu'):
         return torch.load(path, map_location=map_location)
 
 
+def sha256_file(path, chunk_size=1024 * 1024):
+    """Hash a checkpoint file without loading another copy into memory."""
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        while True:
+            chunk = stream.read(int(chunk_size))
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def resolve_temporal_memory_training_scope(
     confidence_only_enabled=False,
     freeze_base_enabled=False,
     head_only_enabled=False,
+    dacc_v2_only_enabled=False,
 ):
     """Resolve the mutually exclusive temporal-memory training scope."""
     enabled = [
@@ -87,12 +125,14 @@ def resolve_temporal_memory_training_scope(
             ('confidence_only', confidence_only_enabled),
             ('memory_only', freeze_base_enabled),
             ('event_head_only', head_only_enabled),
+            ('dacc_v2_projection_only', dacc_v2_only_enabled),
         )
         if bool(active)
     ]
     if len(enabled) > 1:
         raise ValueError(
-            'Temporal-memory confidence-only, freeze-base, and head-only '
+            'Temporal-memory confidence-only, freeze-base, head-only, and '
+            'DACC-v2-only '
             'modes are mutually exclusive: {}.'.format(', '.join(enabled))
         )
     return enabled[0] if enabled else 'all'
@@ -134,6 +174,82 @@ def validate_head_only_training_config(config, training_scope):
         )
     ):
         raise ValueError('Head-only mode requires trajectory loss disabled.')
+
+
+def validate_dacc_v2_training_config(config, training_scope):
+    """Require an explicit legacy-DACC parent for projection-only training."""
+    dacc_v2_enabled = bool(
+        getattr(config, 'temporal_memory_dacc_v2_enabled', False)
+    )
+    density_enabled = bool(
+        getattr(config, 'temporal_frame_density_calibration_enabled', False)
+    )
+    if dacc_v2_enabled and not density_enabled:
+        raise ValueError(
+            'DACC-v2 requires TEMPORAL_FRAME.density_calibration_enabled=true.'
+        )
+    if dacc_v2_enabled and training_scope != 'dacc_v2_projection_only':
+        raise ValueError(
+            'DACC-v2 training requires the projection-only scope.'
+        )
+    if training_scope != 'dacc_v2_projection_only':
+        return
+    if not dacc_v2_enabled:
+        raise ValueError(
+            'DACC-v2-only mode requires '
+            'TEMPORAL_MEMORY.temporal_memory_dacc_v2_enabled=true.'
+        )
+    min_event_count = getattr(
+        config,
+        'temporal_memory_train_min_event_count_exclusive',
+        None,
+    )
+    if min_event_count is None:
+        raise ValueError(
+            'DACC-v2-only mode requires a strict train event-count filter.'
+        )
+    if int(min_event_count) != 30000:
+        raise ValueError(
+            'The controlled DACC-v2 experiment requires event_count > 30000.'
+        )
+    if int(config.temporal_memory_train_views_per_video) != 2:
+        raise ValueError(
+            'The controlled DACC-v2 experiment requires two views per video.'
+        )
+    if bool(
+        getattr(config, 'temporal_memory_dense_sampling_enabled', False)
+    ):
+        raise ValueError(
+            'DACC-v2-only mode does not allow dense multiplier sampling.'
+        )
+    if list(
+        getattr(config, 'temporal_memory_density_bucket_boundaries', [])
+    ) or list(getattr(config, 'temporal_memory_density_bucket_views', [])):
+        raise ValueError(
+            'DACC-v2-only mode does not allow density bucket sampling.'
+        )
+    if bool(getattr(config, 'temporal_memory_metric_aux_enabled', False)):
+        raise ValueError(
+            'The controlled DACC-v2 experiment requires metric auxiliary loss off.'
+        )
+    if bool(getattr(config, 'temporal_memory_target_coverage_enabled', False)):
+        raise ValueError(
+            'The controlled DACC-v2 experiment requires target coverage loss off.'
+        )
+    if bool(
+        getattr(
+            config,
+            'temporal_frame_trajectory_extrapolation_enabled',
+            False,
+        )
+    ):
+        raise ValueError(
+            'The controlled DACC-v2 experiment requires trajectory loss off.'
+        )
+    if bool(getattr(config, 'temporal_frame_confidence_head_enabled', False)):
+        raise ValueError(
+            'The controlled DACC-v2 experiment requires confidence head off.'
+        )
 
 
 def _state_tensor_byte_view(tensor):
@@ -193,7 +309,7 @@ def assert_frozen_model_state_unchanged(
     reference_state,
     mutable_state_keys=HEAD_ONLY_MUTABLE_STATE_KEYS,
 ):
-    """Fail before checkpointing if head-only training changed frozen state."""
+    """Fail before checkpointing if scoped training changed frozen state."""
     mutable_state_keys = frozenset(mutable_state_keys)
     current = model.state_dict()
     expected_names = set(reference_state)
@@ -212,14 +328,14 @@ def assert_frozen_model_state_unchanged(
             expected.shape
         ):
             raise RuntimeError(
-                'Head-only training changed frozen state metadata: {}.'.format(name)
+                'Scoped training changed frozen state metadata: {}.'.format(name)
             )
         if not torch.equal(
             _state_tensor_byte_view(actual),
             _state_tensor_byte_view(expected),
         ):
             raise RuntimeError(
-                'Head-only training modified frozen state tensor: {}.'.format(name)
+                'Scoped training modified frozen state tensor: {}.'.format(name)
             )
 
 
@@ -403,6 +519,8 @@ def build_training_checkpoint(
     git_provenance=None,
     include_cuda_rng=True,
     frozen_state_reference_sha256=None,
+    initialized_from_sha256=None,
+    initialization_migrations=None,
 ):
     """Build an epoch-boundary snapshot that can resume deterministically."""
     freeze_base_enabled = bool(
@@ -414,10 +532,65 @@ def build_training_checkpoint(
     head_only_enabled = bool(
         getattr(config, 'temporal_memory_head_only_enabled', False)
     )
+    dacc_v2_enabled = bool(
+        getattr(config, 'temporal_memory_dacc_v2_enabled', False)
+    )
+    dacc_v2_only_enabled = bool(
+        getattr(config, 'temporal_memory_dacc_v2_only_enabled', False)
+    )
+    density_calibration_enabled = bool(
+        getattr(
+            config,
+            'temporal_frame_density_calibration_enabled',
+            False,
+        )
+    )
+    configured_density_version = density_calibration_version(
+        density_calibration_enabled,
+        dacc_v2_enabled,
+    )
+    model_state_keys = set(model.state_dict())
+    projection_state_keys = {
+        name
+        for name in model_state_keys
+        if name.startswith(
+            'base.density_calibrator.residual_projection.'
+        )
+    }
+    if hasattr(model, 'base') and hasattr(
+        model.base,
+        'density_calibration_enabled',
+    ):
+        model_density_version = density_calibration_version(
+            model.base.density_calibration_enabled,
+            getattr(model, 'density_calibration_v2_enabled', False),
+        )
+        if model_density_version != configured_density_version:
+            raise ValueError(
+                'Checkpoint config density calibration version {} does not '
+                'match model version {}.'.format(
+                    configured_density_version,
+                    model_density_version,
+                )
+            )
+    expected_projection_keys = (
+        DACC_V2_MUTABLE_STATE_KEYS
+        if configured_density_version == DENSITY_CALIBRATION_V2_VERSION
+        else frozenset()
+    )
+    if projection_state_keys != expected_projection_keys:
+        raise ValueError(
+            'Checkpoint density metadata and projection state keys disagree: '
+            'expected {}, got {}.'.format(
+                sorted(expected_projection_keys),
+                sorted(projection_state_keys),
+            )
+        )
     training_scope = resolve_temporal_memory_training_scope(
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     trainable_parameter_count = sum(
         parameter.numel()
@@ -434,16 +607,60 @@ def build_training_checkpoint(
         'trainable_parameter_count': int(trainable_parameter_count),
         'frozen_parameter_count': int(frozen_parameter_count),
     }
+    audited_mutable_keys = None
     if training_scope == 'event_head_only':
+        audited_mutable_keys = HEAD_ONLY_MUTABLE_STATE_KEYS
+    elif training_scope == 'dacc_v2_projection_only':
+        audited_mutable_keys = DACC_V2_MUTABLE_STATE_KEYS
+    if audited_mutable_keys is not None:
         if not frozen_state_reference_sha256:
             raise ValueError(
-                'Head-only checkpoints require a frozen-state reference hash.'
+                'Audited scoped checkpoints require a frozen-state reference hash.'
             )
         training_scope_metadata.update(
             {
-                'mutable_state_keys': sorted(HEAD_ONLY_MUTABLE_STATE_KEYS),
+                'mutable_state_keys': sorted(audited_mutable_keys),
                 'frozen_state_reference_sha256': str(
                     frozen_state_reference_sha256
+                ),
+            }
+        )
+    temporal_memory_metadata = {
+        'temporal_bin_size': int(config.temporal_memory_bin_size),
+        'context_bins': int(config.temporal_memory_context_bins),
+        'width': int(config.temporal_memory_width),
+        'sequence_length': int(config.temporal_memory_sequence_length),
+        'log_count_clip': float(config.temporal_memory_log_count_clip),
+        'density_calibration_enabled': density_calibration_enabled,
+        'density_calibration_version': int(configured_density_version),
+        'trajectory_extrapolation_enabled': bool(
+            getattr(
+                config,
+                'temporal_frame_trajectory_extrapolation_enabled',
+                False,
+            )
+        ),
+        'confidence_head_enabled': bool(
+            getattr(config, 'temporal_frame_confidence_head_enabled', False)
+        ),
+        'confidence_only_enabled': bool(confidence_only_enabled),
+        'freeze_base_enabled': bool(freeze_base_enabled),
+        'head_only_enabled': bool(head_only_enabled),
+        'dacc_v2_only_enabled': bool(dacc_v2_only_enabled),
+        'temporal_attention_enabled': bool(
+            getattr(
+                config,
+                'temporal_memory_temporal_attention_enabled',
+                False,
+            )
+        ),
+    }
+    if configured_density_version == DENSITY_CALIBRATION_V2_VERSION:
+        temporal_memory_metadata.update(
+            {
+                'density_calibration_v2_basis': DENSITY_CALIBRATION_V2_BASIS,
+                'density_calibration_v2_residual_scale': (
+                    DENSITY_CALIBRATION_V2_RESIDUAL_SCALE
                 ),
             }
         )
@@ -468,44 +685,7 @@ def build_training_checkpoint(
             if best_loss_checkpoint is None
             else str(Path(best_loss_checkpoint).resolve())
         ),
-        'temporal_memory': {
-            'temporal_bin_size': int(config.temporal_memory_bin_size),
-            'context_bins': int(config.temporal_memory_context_bins),
-            'width': int(config.temporal_memory_width),
-            'sequence_length': int(config.temporal_memory_sequence_length),
-            'log_count_clip': float(config.temporal_memory_log_count_clip),
-            'density_calibration_enabled': bool(
-                getattr(
-                    config,
-                    'temporal_frame_density_calibration_enabled',
-                    False,
-                )
-            ),
-            'trajectory_extrapolation_enabled': bool(
-                getattr(
-                    config,
-                    'temporal_frame_trajectory_extrapolation_enabled',
-                    False,
-                )
-            ),
-            'confidence_head_enabled': bool(
-                getattr(config, 'temporal_frame_confidence_head_enabled', False)
-            ),
-            'confidence_only_enabled': bool(
-                confidence_only_enabled
-            ),
-            'freeze_base_enabled': bool(
-                freeze_base_enabled
-            ),
-            'head_only_enabled': bool(head_only_enabled),
-            'temporal_attention_enabled': bool(
-                getattr(
-                    config,
-                    'temporal_memory_temporal_attention_enabled',
-                    False,
-                )
-            ),
-        },
+        'temporal_memory': temporal_memory_metadata,
         'provenance': {
             'saved_at': datetime.now().astimezone().isoformat(timespec='seconds'),
             'resolved_config': config.resolved_config,
@@ -515,6 +695,12 @@ def build_training_checkpoint(
                 if initialized_from is None
                 else str(Path(initialized_from).resolve())
             ),
+            'initialized_from_sha256': (
+                None
+                if initialized_from_sha256 is None
+                else str(initialized_from_sha256)
+            ),
+            'initialization_migrations': list(initialization_migrations or []),
             'resume_parent_checkpoint': (
                 None
                 if resume_parent_checkpoint is None
@@ -585,36 +771,67 @@ def load_training_resume(
             'Resume optimizer parameter-group names/order {} do not match '
             'configured {}.'.format(saved_group_names, current_group_names)
         )
-    model.load_state_dict(checkpoint['model_state_dict'], strict=True)
-    if bool(
-        getattr(current_config, 'temporal_memory_head_only_enabled', False)
+    saved_memory = checkpoint.get('temporal_memory')
+    if not isinstance(saved_memory, dict):
+        raise ValueError('Resume checkpoint is missing temporal-memory metadata.')
+    saved_density_version = validate_density_calibration_metadata(saved_memory)
+    if hasattr(model, 'base') and hasattr(
+        model.base,
+        'density_calibration_enabled',
     ):
+        model_density_version = density_calibration_version(
+            model.base.density_calibration_enabled,
+            getattr(model, 'density_calibration_v2_enabled', False),
+        )
+        if saved_density_version != model_density_version:
+            raise ValueError(
+                'Resume checkpoint density calibration version {} does not match '
+                'configured {}.'.format(
+                    saved_density_version,
+                    model_density_version,
+                )
+            )
+    model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+    expected_scope = None
+    expected_mutable_keys = None
+    if bool(getattr(current_config, 'temporal_memory_head_only_enabled', False)):
+        expected_scope = 'event_head_only'
+        expected_mutable_keys = HEAD_ONLY_MUTABLE_STATE_KEYS
+    elif bool(
+        getattr(current_config, 'temporal_memory_dacc_v2_only_enabled', False)
+    ):
+        expected_scope = 'dacc_v2_projection_only'
+        expected_mutable_keys = DACC_V2_MUTABLE_STATE_KEYS
+    if expected_scope is not None:
         training_scope = checkpoint.get('provenance', {}).get(
             'training_scope',
             {},
         )
-        if training_scope.get('name') != 'event_head_only':
+        if training_scope.get('name') != expected_scope:
             raise ValueError(
-                'Head-only resume checkpoint is missing its training scope.'
+                'Audited resume checkpoint is missing its training scope.'
             )
         mutable_state_keys = frozenset(
             training_scope.get('mutable_state_keys', [])
         )
-        if mutable_state_keys != HEAD_ONLY_MUTABLE_STATE_KEYS:
+        if mutable_state_keys != expected_mutable_keys:
             raise ValueError(
-                'Head-only resume checkpoint has unexpected mutable state keys.'
+                'Audited resume checkpoint has unexpected mutable state keys.'
             )
         reference_sha256 = training_scope.get(
             'frozen_state_reference_sha256'
         )
         if not reference_sha256:
             raise ValueError(
-                'Head-only resume checkpoint is missing its frozen-state hash.'
+                'Audited resume checkpoint is missing its frozen-state hash.'
             )
-        actual_sha256 = frozen_model_state_sha256(model)
+        actual_sha256 = frozen_model_state_sha256(
+            model,
+            mutable_state_keys=expected_mutable_keys,
+        )
         if actual_sha256 != reference_sha256:
             raise ValueError(
-                'Head-only resume checkpoint frozen state does not match its '
+                'Audited resume checkpoint frozen state does not match its '
                 'recorded reference hash.'
             )
     try:
@@ -695,6 +912,8 @@ def load_p23_base_weights(
     width,
     density_calibration_enabled=False,
     confidence_head_enabled=False,
+    density_calibration_v2_enabled=False,
+    initialization_migrations=None,
 ):
     checkpoint_path = Path(str(checkpoint_path).strip())
     if not checkpoint_path.is_file():
@@ -704,6 +923,8 @@ def load_p23_base_weights(
     checkpoint = load_checkpoint_file(checkpoint_path, map_location='cpu')
     saved_memory = checkpoint.get('temporal_memory')
     if saved_memory is not None:
+        if not isinstance(saved_memory, dict):
+            raise ValueError('Temporal-memory checkpoint metadata must be a mapping.')
         saved_context_bins = saved_memory.get('context_bins')
         saved_width = saved_memory.get('width')
         saved_sequence_length = saved_memory.get('sequence_length')
@@ -732,6 +953,28 @@ def load_p23_base_weights(
         saved_density_calibration = bool(
             saved_memory.get('density_calibration_enabled', False)
         )
+        saved_density_version = validate_density_calibration_metadata(
+            saved_memory
+        )
+        configured_density_version = density_calibration_version(
+            density_calibration_enabled,
+            density_calibration_v2_enabled,
+        )
+        adding_dacc_v2 = (
+            saved_density_version == DENSITY_CALIBRATION_LEGACY_VERSION
+            and configured_density_version == DENSITY_CALIBRATION_V2_VERSION
+        )
+        if (
+            saved_density_version != configured_density_version
+            and not adding_dacc_v2
+        ):
+            raise ValueError(
+                'M5 density calibration version={} does not match configured '
+                '{}.'.format(
+                    saved_density_version,
+                    configured_density_version,
+                )
+            )
         saved_confidence_head = bool(
             saved_memory.get('confidence_head_enabled', False)
         )
@@ -757,7 +1000,7 @@ def load_p23_base_weights(
                 )
             )
         configured_temporal_attention = bool(
-            getattr(cfg, 'temporal_memory_temporal_attention_enabled', False)
+            getattr(model, 'temporal_attention_enabled', False)
         )
         adding_temporal_attention = (
             configured_temporal_attention and not saved_temporal_attention
@@ -768,14 +1011,25 @@ def load_p23_base_weights(
                     saved_temporal_attention, configured_temporal_attention
                 )
             )
-        # The attention branch is zero-initialized at construction time, so it
-        # can be attached safely to an existing ConvGRU checkpoint. Its
-        # parameters are intentionally the only new missing keys allowed here.
+        if adding_dacc_v2 and (
+            adding_confidence_head or adding_temporal_attention
+        ):
+            raise ValueError(
+                'DACC-v2 migration must add only the residual projection; '
+                'confidence and attention branches must already match the parent.'
+            )
+        # Every permitted addition is zero initialized and its exact missing
+        # keys are audited below. No inference or resume path uses this escape.
+        adding_branch = (
+            adding_confidence_head
+            or adding_temporal_attention
+            or adding_dacc_v2
+        )
         load_result = model.load_state_dict(
             checkpoint['model_state_dict'],
-            strict=not (adding_confidence_head or adding_temporal_attention),
+            strict=not adding_branch,
         )
-        if adding_confidence_head or adding_temporal_attention:
+        if adding_branch:
             expected_missing = set()
             if adding_confidence_head:
                 expected_missing.update(
@@ -787,6 +1041,8 @@ def load_p23_base_weights(
                     'temporal_attn.' + name
                     for name in model.temporal_attn.state_dict()
                 )
+            if adding_dacc_v2:
+                expected_missing.update(DACC_V2_MUTABLE_STATE_KEYS)
             if (
                 set(load_result.missing_keys) != expected_missing
                 or load_result.unexpected_keys
@@ -799,9 +1055,58 @@ def load_p23_base_weights(
                         load_result.unexpected_keys,
                     )
                 )
+        if adding_dacc_v2:
+            model_state = model.state_dict()
+            source_state = checkpoint['model_state_dict']
+            for name, expected in source_state.items():
+                actual = model_state[name].detach().cpu()
+                if actual.dtype != expected.dtype or tuple(actual.shape) != tuple(
+                    expected.shape
+                ) or not torch.equal(
+                    _state_tensor_byte_view(actual),
+                    _state_tensor_byte_view(expected),
+                ):
+                    raise RuntimeError(
+                        'DACC-v2 migration changed inherited tensor: {}.'.format(
+                            name
+                        )
+                    )
+            projection = model_state[
+                'base.density_calibrator.residual_projection.weight'
+            ]
+            if torch.count_nonzero(projection).item() != 0:
+                raise RuntimeError(
+                    'DACC-v2 residual projection must remain zero after migration.'
+                )
+            source_state_sha256 = frozen_model_state_sha256(
+                source_state,
+                mutable_state_keys=DACC_V2_MUTABLE_STATE_KEYS,
+            )
+            migrated_state_sha256 = frozen_model_state_sha256(
+                model,
+                mutable_state_keys=DACC_V2_MUTABLE_STATE_KEYS,
+            )
+            if source_state_sha256 != migrated_state_sha256:
+                raise RuntimeError(
+                    'DACC-v2 migrated frozen state does not match its parent.'
+                )
+            if initialization_migrations is not None:
+                initialization_migrations.append(
+                    {
+                        'name': 'density_calibration_v1_to_v2_zero_residual',
+                        'missing_keys': sorted(DACC_V2_MUTABLE_STATE_KEYS),
+                        'source_model_state_sha256': source_state_sha256,
+                        'migrated_frozen_state_sha256': migrated_state_sha256,
+                    }
+                )
         return checkpoint_path
 
     saved = checkpoint.get('temporal_frame', {})
+    if density_calibration_v2_enabled:
+        raise ValueError(
+            'DACC-v2 requires a legacy temporal-memory checkpoint parent; '
+            'direct temporal-frame initialization is not allowed.'
+        )
     if saved.get('context_bins') is not None and int(
         saved['context_bins']
     ) != int(context_bins):
@@ -845,12 +1150,14 @@ def configure_temporal_memory_trainable_parameters(
     confidence_only_enabled=False,
     freeze_base_enabled=False,
     head_only_enabled=False,
+    dacc_v2_only_enabled=False,
 ):
     """Apply an explicit, checkpoint-neutral temporal training scope."""
     training_scope = resolve_temporal_memory_training_scope(
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     if training_scope == 'confidence_only':
         if not model.confidence_head_enabled:
@@ -893,6 +1200,49 @@ def configure_temporal_memory_trainable_parameters(
                     trainable_count
                 )
             )
+    elif training_scope == 'dacc_v2_projection_only':
+        calibrator = model.base.density_calibrator
+        projection = (
+            None if calibrator is None else calibrator.residual_projection
+        )
+        if projection is None or not getattr(
+            model,
+            'density_calibration_v2_enabled',
+            False,
+        ):
+            raise ValueError(
+                'DACC-v2-only mode requires a DACC-v2 model.'
+            )
+        projection_parameter_ids = {
+            id(parameter) for parameter in projection.parameters()
+        }
+        for parameter in model.parameters():
+            parameter.requires_grad_(
+                id(parameter) in projection_parameter_ids
+            )
+        trainable_names = {
+            name
+            for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        }
+        if trainable_names != DACC_V2_MUTABLE_STATE_KEYS:
+            raise RuntimeError(
+                'DACC-v2 trainable parameters are {} instead of {}.'.format(
+                    sorted(trainable_names),
+                    sorted(DACC_V2_MUTABLE_STATE_KEYS),
+                )
+            )
+        trainable_count = sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        )
+        if trainable_count != 32:
+            raise RuntimeError(
+                'DACC-v2-only mode expected 32 trainable parameters, got {}.'.format(
+                    trainable_count
+                )
+            )
 
 
 def set_temporal_memory_training_mode(
@@ -900,12 +1250,14 @@ def set_temporal_memory_training_mode(
     confidence_only_enabled=False,
     freeze_base_enabled=False,
     head_only_enabled=False,
+    dacc_v2_only_enabled=False,
 ):
     """Set module modes without re-enabling a frozen base at each epoch."""
     training_scope = resolve_temporal_memory_training_scope(
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     if training_scope == 'confidence_only':
         model.eval()
@@ -914,6 +1266,10 @@ def set_temporal_memory_training_mode(
     if training_scope == 'event_head_only':
         model.eval()
         model.base.head.train()
+        return
+    if training_scope == 'dacc_v2_projection_only':
+        model.eval()
+        model.base.density_calibrator.residual_projection.train()
         return
     model.train()
     if training_scope == 'memory_only':
@@ -925,21 +1281,27 @@ def build_optimizer(
     config,
     confidence_only_enabled=False,
     head_only_enabled=False,
+    dacc_v2_only_enabled=False,
 ):
     base_multiplier = float(config.temporal_memory_base_lr_multiplier)
     memory_multiplier = float(config.temporal_memory_memory_lr_multiplier)
     confidence_multiplier = float(
         getattr(config, 'temporal_memory_confidence_lr_multiplier', 1.0)
     )
+    dacc_v2_multiplier = float(
+        getattr(config, 'temporal_memory_dacc_v2_lr_multiplier', 1.0)
+    )
     if (
         base_multiplier <= 0.0
         or memory_multiplier <= 0.0
         or confidence_multiplier <= 0.0
+        or dacc_v2_multiplier <= 0.0
     ):
         raise ValueError('Temporal-memory learning-rate multipliers must be positive.')
     resolve_temporal_memory_training_scope(
         confidence_only_enabled=confidence_only_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     if bool(head_only_enabled):
         head_parameters = [
@@ -959,6 +1321,29 @@ def build_optimizer(
                     'name': 'event_head',
                     'params': head_parameters,
                     'lr': float(config.lr),
+                }
+            ],
+            weight_decay=0.0,
+        )
+    if bool(dacc_v2_only_enabled):
+        projection = model.base.density_calibrator.residual_projection
+        projection_parameters = [
+            parameter
+            for parameter in projection.parameters()
+            if parameter.requires_grad
+        ]
+        if len(projection_parameters) != 1 or sum(
+            parameter.numel() for parameter in projection_parameters
+        ) != 32:
+            raise RuntimeError(
+                'DACC-v2 optimizer requires exactly one tensor and 32 parameters.'
+            )
+        return optim.AdamW(
+            [
+                {
+                    'name': 'dacc_v2',
+                    'params': projection_parameters,
+                    'lr': float(config.lr) * dacc_v2_multiplier,
                 }
             ],
             weight_decay=0.0,
@@ -1051,6 +1436,7 @@ def memory_config_summary(config):
         'base_lr_multiplier={}, memory_lr_multiplier={}, '
         'confidence_lr_multiplier={}, '
         'attention_enabled={}, freeze_base_enabled={}, head_only_enabled={}, '
+        'dacc_v2_enabled={}, dacc_v2_only_enabled={}, '
         'min_event_count_exclusive={})'
     ).format(
         config.temporal_memory_bin_size,
@@ -1067,6 +1453,8 @@ def memory_config_summary(config):
         bool(getattr(config, 'temporal_memory_temporal_attention_enabled', False)),
         bool(getattr(config, 'temporal_memory_freeze_base_enabled', False)),
         bool(getattr(config, 'temporal_memory_head_only_enabled', False)),
+        bool(getattr(config, 'temporal_memory_dacc_v2_enabled', False)),
+        bool(getattr(config, 'temporal_memory_dacc_v2_only_enabled', False)),
         getattr(
             config,
             'temporal_memory_train_min_event_count_exclusive',
@@ -1119,10 +1507,17 @@ if __name__ == '__main__':
     head_only_enabled = bool(
         getattr(cfg, 'temporal_memory_head_only_enabled', False)
     )
+    dacc_v2_enabled = bool(
+        getattr(cfg, 'temporal_memory_dacc_v2_enabled', False)
+    )
+    dacc_v2_only_enabled = bool(
+        getattr(cfg, 'temporal_memory_dacc_v2_only_enabled', False)
+    )
     training_scope = resolve_temporal_memory_training_scope(
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     if confidence_only_enabled and not confidence_head_enabled:
         raise ValueError(
@@ -1130,6 +1525,7 @@ if __name__ == '__main__':
             'TEMPORAL_FRAME.confidence_head_enabled=true.'
         )
     validate_head_only_training_config(cfg, training_scope)
+    validate_dacc_v2_training_config(cfg, training_scope)
 
     resume_checkpoint_value = str(
         getattr(cfg, 'resume_checkpoint', '')
@@ -1334,10 +1730,13 @@ if __name__ == '__main__':
         input_channels=int(cfg.temporal_memory_context_bins) * 2,
         width=int(cfg.temporal_memory_width),
         density_calibration_enabled=density_calibration_enabled,
+        density_calibration_v2_enabled=dacc_v2_enabled,
         confidence_head_enabled=confidence_head_enabled,
         temporal_attention_enabled=temporal_attention_enabled,
     ).to(device)
     initialized_from = None
+    initialized_from_sha256 = None
+    initialization_migrations = []
     if resume_parent_checkpoint is None:
         initialized_from = load_p23_base_weights(
             model,
@@ -1345,8 +1744,11 @@ if __name__ == '__main__':
             cfg.temporal_memory_context_bins,
             cfg.temporal_memory_width,
             density_calibration_enabled=density_calibration_enabled,
+            density_calibration_v2_enabled=dacc_v2_enabled,
             confidence_head_enabled=confidence_head_enabled,
+            initialization_migrations=initialization_migrations,
         )
+        initialized_from_sha256 = sha256_file(initialized_from)
         if head_only_enabled:
             validate_head_only_initialization_checkpoint(initialized_from)
     configure_temporal_memory_trainable_parameters(
@@ -1354,12 +1756,14 @@ if __name__ == '__main__':
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     optimizer = build_optimizer(
         model,
         cfg,
         confidence_only_enabled=confidence_only_enabled,
         head_only_enabled=head_only_enabled,
+        dacc_v2_only_enabled=dacc_v2_only_enabled,
     )
     optimizer_parameters = [
         parameter
@@ -1389,25 +1793,42 @@ if __name__ == '__main__':
         initialized_from = resumed.get('provenance', {}).get(
             'initialized_from'
         )
+        initialized_from_sha256 = resumed.get('provenance', {}).get(
+            'initialized_from_sha256'
+        )
+        initialization_migrations = list(
+            resumed.get('provenance', {}).get('initialization_migrations', [])
+        )
         if start_epoch > int(cfg.epochs):
             raise ValueError(
                 'Resume checkpoint starts at epoch {}, beyond configured '
                 'TRAIN.epochs={}.'.format(start_epoch, cfg.epochs)
             )
+    audited_mutable_state_keys = None
     if head_only_enabled:
+        audited_mutable_state_keys = HEAD_ONLY_MUTABLE_STATE_KEYS
+    elif dacc_v2_only_enabled:
+        audited_mutable_state_keys = DACC_V2_MUTABLE_STATE_KEYS
+    if audited_mutable_state_keys is not None:
         if resume_parent_checkpoint is None:
-            frozen_state_reference_sha256 = frozen_model_state_sha256(model)
+            frozen_state_reference_sha256 = frozen_model_state_sha256(
+                model,
+                mutable_state_keys=audited_mutable_state_keys,
+            )
         else:
             frozen_state_reference_sha256 = resumed['provenance'][
                 'training_scope'
             ]['frozen_state_reference_sha256']
-        frozen_state_reference = snapshot_frozen_model_state(model)
+        frozen_state_reference = snapshot_frozen_model_state(
+            model,
+            mutable_state_keys=audited_mutable_state_keys,
+        )
         if (
             frozen_model_state_sha256(frozen_state_reference, mutable_state_keys=())
             != frozen_state_reference_sha256
         ):
             raise RuntimeError(
-                'Head-only frozen-state snapshot does not match its reference hash.'
+                'Audited frozen-state snapshot does not match its reference hash.'
             )
 
     print('random seed:{}'.format(cfg.seed))
@@ -1459,6 +1880,12 @@ if __name__ == '__main__':
             'event-head-only mode: 17 parameters trainable; frozen state sha256:',
             frozen_state_reference_sha256,
         )
+    if dacc_v2_only_enabled:
+        print(
+            'DACC-v2 projection-only mode: 32 parameters trainable; '
+            'frozen state sha256:',
+            frozen_state_reference_sha256,
+        )
 
     last_checkpoint_path = (
         resume_parent_checkpoint
@@ -1472,6 +1899,7 @@ if __name__ == '__main__':
             confidence_only_enabled=confidence_only_enabled,
             freeze_base_enabled=freeze_base_enabled,
             head_only_enabled=head_only_enabled,
+            dacc_v2_only_enabled=dacc_v2_only_enabled,
         )
         loss_sum = 0.0
         positive_fraction_sum = 0.0
@@ -1678,14 +2106,18 @@ if __name__ == '__main__':
         scheduler.step()
 
         epoch_loss = loss_sum / max(batch_count, 1)
-        if head_only_enabled:
+        if audited_mutable_state_keys is not None:
             assert_frozen_model_state_unchanged(
                 model,
                 frozen_state_reference,
+                mutable_state_keys=audited_mutable_state_keys,
             )
-            if frozen_model_state_sha256(model) != frozen_state_reference_sha256:
+            if frozen_model_state_sha256(
+                model,
+                mutable_state_keys=audited_mutable_state_keys,
+            ) != frozen_state_reference_sha256:
                 raise RuntimeError(
-                    'Head-only frozen-state hash changed before checkpointing.'
+                    'Audited frozen-state hash changed before checkpointing.'
                 )
         is_best = epoch_loss < best_loss
         if is_best:
@@ -1709,6 +2141,8 @@ if __name__ == '__main__':
             best_loss_checkpoint=best_loss_checkpoint,
             git_provenance=git_provenance,
             frozen_state_reference_sha256=frozen_state_reference_sha256,
+            initialized_from_sha256=initialized_from_sha256,
+            initialization_migrations=initialization_migrations,
         )
         if is_best:
             save_checkpoint(
@@ -1748,8 +2182,12 @@ if __name__ == '__main__':
                 )
             )
 
-    if head_only_enabled:
-        assert_frozen_model_state_unchanged(model, frozen_state_reference)
+    if audited_mutable_state_keys is not None:
+        assert_frozen_model_state_unchanged(
+            model,
+            frozen_state_reference,
+            mutable_state_keys=audited_mutable_state_keys,
+        )
     summary = {
         'started_at': started_at.isoformat(timespec='seconds'),
         'seed': int(cfg.seed),
@@ -1770,6 +2208,8 @@ if __name__ == '__main__':
         'initialized_from': (
             None if initialized_from is None else str(initialized_from)
         ),
+        'initialized_from_sha256': initialized_from_sha256,
+        'initialization_migrations': initialization_migrations,
         'resume_parent_checkpoint': (
             None
             if resume_parent_checkpoint is None

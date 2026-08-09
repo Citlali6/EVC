@@ -7,6 +7,10 @@ import numpy as np
 import torch
 
 from dataset.temporal_frame import build_temporal_context_frame
+from model.temporal_frame_net import (
+    DENSITY_CALIBRATION_V2_VERSION,
+    validate_density_calibration_metadata,
+)
 from model.temporal_memory_net import BidirectionalTemporalMemoryNet
 
 
@@ -147,6 +151,12 @@ def load_temporal_memory_model(
     saved_density_calibration = bool(
         saved.get('density_calibration_enabled', False)
     )
+    saved_density_calibration_version = validate_density_calibration_metadata(
+        saved
+    )
+    saved_density_calibration_v2 = (
+        saved_density_calibration_version == DENSITY_CALIBRATION_V2_VERSION
+    )
     saved_confidence_head = bool(
         saved.get('confidence_head_enabled', False)
     )
@@ -178,6 +188,7 @@ def load_temporal_memory_model(
         input_channels=int(context_bins) * 2,
         width=int(width),
         density_calibration_enabled=saved_density_calibration,
+        density_calibration_v2_enabled=saved_density_calibration_v2,
         confidence_head_enabled=saved_confidence_head,
         temporal_attention_enabled=saved_temporal_attention,
     ).to(device)

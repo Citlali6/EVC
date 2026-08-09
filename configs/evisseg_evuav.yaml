@@ -319,4 +319,9 @@ TEMPORAL_MEMORY:
   temporal_memory_freeze_base_enabled: false
   # H17: train only the released event output head (16 weights + one bias).
   temporal_memory_head_only_enabled: false
+  # DACC-v2: a zero-initialized 2->16 residual density projection. The
+  # projection-only scope is mutually exclusive with every other narrow scope.
+  temporal_memory_dacc_v2_enabled: false
+  temporal_memory_dacc_v2_only_enabled: false
+  temporal_memory_dacc_v2_lr_multiplier: 1.0
   temporal_memory_temporal_attention_enabled: false

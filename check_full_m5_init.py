@@ -6,6 +6,10 @@ import torch
 
 from configs.configs import cfg
 from model.temporal_memory_net import BidirectionalTemporalMemoryNet
+from model.temporal_frame_net import (
+    DENSITY_CALIBRATION_V2_VERSION,
+    validate_density_calibration_metadata,
+)
 from train_temporal_memory import load_p23_base_weights
 
 
@@ -18,6 +22,8 @@ CHECKPOINT = Path(
 def main():
     checkpoint = torch.load(CHECKPOINT, map_location='cpu')
     saved = checkpoint['temporal_memory']
+    density_version = validate_density_calibration_metadata(saved)
+    dacc_v2_enabled = density_version == DENSITY_CALIBRATION_V2_VERSION
     confidence_head_enabled = bool(
         getattr(cfg, 'temporal_frame_confidence_head_enabled', False)
     )
@@ -25,6 +31,7 @@ def main():
         input_channels=int(cfg.temporal_memory_context_bins) * 2,
         width=int(cfg.temporal_memory_width),
         density_calibration_enabled=bool(saved.get('density_calibration_enabled', False)),
+        density_calibration_v2_enabled=dacc_v2_enabled,
         confidence_head_enabled=confidence_head_enabled,
         temporal_attention_enabled=bool(saved.get('temporal_attention_enabled', False)),
     )
@@ -35,6 +42,7 @@ def main():
         cfg.temporal_memory_width,
         bool(saved.get('density_calibration_enabled', False)),
         confidence_head_enabled,
+        density_calibration_v2_enabled=dacc_v2_enabled,
     )
     print('full M5 initialization OK:', loaded)
 

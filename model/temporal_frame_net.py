@@ -1,5 +1,7 @@
 """A compact full-frame temporal event segmentation network."""
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -9,6 +11,88 @@ from utils.multiscale_motion import (
     build_multiscale_motion_persistence_channels,
     multiscale_motion_channel_count,
 )
+
+
+DENSITY_CALIBRATION_DISABLED_VERSION = 0
+DENSITY_CALIBRATION_LEGACY_VERSION = 1
+DENSITY_CALIBRATION_V2_VERSION = 2
+DENSITY_CALIBRATION_V2_BASIS = 'constant_log_total_v1'
+DENSITY_CALIBRATION_V2_RESIDUAL_SCALE = 0.5
+
+
+def density_calibration_version(enabled, v2_enabled=False):
+    """Return the canonical checkpoint version for a configured calibrator."""
+    enabled = bool(enabled)
+    v2_enabled = bool(v2_enabled)
+    if v2_enabled and not enabled:
+        raise ValueError('DACC-v2 requires legacy density calibration to be enabled.')
+    if v2_enabled:
+        return DENSITY_CALIBRATION_V2_VERSION
+    if enabled:
+        return DENSITY_CALIBRATION_LEGACY_VERSION
+    return DENSITY_CALIBRATION_DISABLED_VERSION
+
+
+def resolve_density_calibration_version(metadata):
+    """Resolve old and new checkpoint metadata without guessing a v2 branch."""
+    if not isinstance(metadata, dict):
+        raise ValueError('Temporal-memory architecture metadata must be a mapping.')
+    enabled = metadata.get('density_calibration_enabled', False)
+    if not isinstance(enabled, bool):
+        raise ValueError('Density calibration enabled flag must be boolean.')
+    raw_version = metadata.get('density_calibration_version')
+    if raw_version is None:
+        return density_calibration_version(enabled, False)
+    if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+        raise ValueError('Density calibration version must be 0, 1, or 2.')
+    version = raw_version
+    if version not in {
+        DENSITY_CALIBRATION_DISABLED_VERSION,
+        DENSITY_CALIBRATION_LEGACY_VERSION,
+        DENSITY_CALIBRATION_V2_VERSION,
+    }:
+        raise ValueError('Density calibration version must be 0, 1, or 2.')
+    if enabled != (version != DENSITY_CALIBRATION_DISABLED_VERSION):
+        raise ValueError(
+            'Density calibration enabled flag is inconsistent with version {}.'.format(
+                version
+            )
+        )
+    return version
+
+
+def validate_density_calibration_metadata(metadata):
+    """Validate the complete architecture contract and return its version."""
+    version = resolve_density_calibration_version(metadata)
+    basis = metadata.get('density_calibration_v2_basis')
+    scale = metadata.get('density_calibration_v2_residual_scale')
+    if version == DENSITY_CALIBRATION_V2_VERSION:
+        if basis != DENSITY_CALIBRATION_V2_BASIS:
+            raise ValueError(
+                'DACC-v2 checkpoint basis {!r} is not supported.'.format(basis)
+            )
+        try:
+            valid_scale = (
+                not isinstance(scale, bool)
+                and scale is not None
+                and float(scale) == DENSITY_CALIBRATION_V2_RESIDUAL_SCALE
+            )
+        except (TypeError, ValueError, OverflowError):
+            valid_scale = False
+        if not valid_scale:
+            raise ValueError(
+                'DACC-v2 checkpoint residual scale must be {}.'.format(
+                    DENSITY_CALIBRATION_V2_RESIDUAL_SCALE
+                )
+            )
+    elif (
+        'density_calibration_v2_basis' in metadata
+        or 'density_calibration_v2_residual_scale' in metadata
+    ):
+        raise ValueError(
+            'Legacy density calibration metadata must not declare DACC-v2 fields.'
+        )
+    return version
 
 
 def _group_count(channels, maximum_groups=8):
@@ -197,9 +281,15 @@ class DensityAdaptiveChannelCalibrator(nn.Module):
     4. Residual identity initialization (weights ≈ 1.0 at startup).
     """
 
-    def __init__(self, feature_channels, reduction=16):
+    def __init__(
+        self,
+        feature_channels,
+        reduction=16,
+        residual_v2_enabled=False,
+    ):
         super().__init__()
-        self.feature_channels = feature_channels
+        self.feature_channels = int(feature_channels)
+        self.residual_v2_enabled = bool(residual_v2_enabled)
 
         self.density_encoder = nn.Sequential(
             nn.Conv2d(1, 1, kernel_size=3, stride=2, padding=1),
@@ -216,12 +306,45 @@ class DensityAdaptiveChannelCalibrator(nn.Module):
 
         self._initialize_weights()
 
+        self.residual_projection = None
+        if self.residual_v2_enabled:
+            self.residual_projection = nn.Linear(
+                2,
+                self.feature_channels,
+                bias=False,
+            )
+            nn.init.zeros_(self.residual_projection.weight)
+
     def _initialize_weights(self):
         nn.init.zeros_(self.gating_network[0].weight)
         nn.init.zeros_(self.gating_network[2].weight)
         if self.gating_network[2].bias is not None:
             nn.init.zeros_(self.gating_network[0].bias)
             self.gating_network[2].bias.data.fill_(4.0)
+
+    @staticmethod
+    def density_basis(original_input):
+        """Return a constant plus bounded log-total activity per frame."""
+        if original_input.ndim != 4:
+            raise ValueError('original_input must have shape [B, C, H, W].')
+        element_count = int(
+            original_input.shape[1]
+            * original_input.shape[2]
+            * original_input.shape[3]
+        )
+        if element_count <= 0:
+            raise ValueError('original_input must not contain an empty dimension.')
+        total_activity = original_input.abs().sum(dim=(1, 2, 3))
+        normalized_log_total = torch.log1p(total_activity) / math.log1p(
+            element_count
+        )
+        return torch.stack(
+            (
+                torch.ones_like(normalized_log_total),
+                normalized_log_total,
+            ),
+            dim=1,
+        )
 
     def forward(self, features, original_input):
         """Args:
@@ -236,6 +359,15 @@ class DensityAdaptiveChannelCalibrator(nn.Module):
         density_map = original_input.abs().sum(dim=1, keepdim=True)
         global_density = self.density_encoder(density_map).view(B, -1)
         channel_weights = self.gating_network(global_density).view(B, C, 1, 1)
+
+        if self.residual_v2_enabled:
+            density_basis = self.density_basis(original_input)
+            residual = DENSITY_CALIBRATION_V2_RESIDUAL_SCALE * torch.tanh(
+                self.residual_projection(density_basis)
+            )
+            channel_weights = channel_weights * (
+                1.0 + residual.view(B, C, 1, 1)
+            )
 
         return features * channel_weights
 
@@ -253,6 +385,7 @@ class TemporalFrameNet(nn.Module):
         target_center_enabled=False,
         confidence_head_enabled=False,
         density_calibration_enabled=False,
+        density_calibration_v2_enabled=False,
     ):
         super().__init__()
         input_channels = int(input_channels)
@@ -276,6 +409,13 @@ class TemporalFrameNet(nn.Module):
         self.target_center_enabled = bool(target_center_enabled)
         self.confidence_head_enabled = bool(confidence_head_enabled)
         self.density_calibration_enabled = bool(density_calibration_enabled)
+        self.density_calibration_v2_enabled = bool(
+            density_calibration_v2_enabled
+        )
+        density_calibration_version(
+            self.density_calibration_enabled,
+            self.density_calibration_v2_enabled,
+        )
         width2 = width * 2
         width4 = width * 4
         width6 = width * 6
@@ -354,6 +494,7 @@ class TemporalFrameNet(nn.Module):
             self.density_calibrator = DensityAdaptiveChannelCalibrator(
                 feature_channels=width,
                 reduction=16,
+                residual_v2_enabled=self.density_calibration_v2_enabled,
             )
 
     def forward(

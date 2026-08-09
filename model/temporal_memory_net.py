@@ -110,6 +110,7 @@ class BidirectionalTemporalMemoryNet(nn.Module):
         width=16,
         temporal_attention_enabled=False,
         density_calibration_enabled=False,
+        density_calibration_v2_enabled=False,
         confidence_head_enabled=False,
     ):
         super().__init__()
@@ -117,9 +118,15 @@ class BidirectionalTemporalMemoryNet(nn.Module):
             input_channels=int(input_channels),
             width=int(width),
             density_calibration_enabled=bool(density_calibration_enabled),
+            density_calibration_v2_enabled=bool(
+                density_calibration_v2_enabled
+            ),
             confidence_head_enabled=bool(confidence_head_enabled),
         )
         self.confidence_head_enabled = bool(confidence_head_enabled)
+        self.density_calibration_v2_enabled = bool(
+            density_calibration_v2_enabled
+        )
         bottleneck_channels = int(width) * 6
         self.forward_memory = ConvGRUCell(bottleneck_channels)
         self.backward_memory = ConvGRUCell(bottleneck_channels)

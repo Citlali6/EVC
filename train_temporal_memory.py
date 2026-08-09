@@ -26,6 +26,7 @@ from utils.component_hard_negative import (
 )
 from utils.temporal_frame_loss import (
     frame_balanced_event_bce,
+    target_time_group_coverage_loss,
     trajectory_extrapolation_loss_memory,
 )
 
@@ -656,6 +657,20 @@ def memory_config_summary(config):
     )
 
 
+def apply_target_coverage_loss(
+    base_loss,
+    coverage_loss,
+    enabled,
+    epoch,
+    warmup_epochs,
+    weight,
+):
+    """Add coverage only after warmup and preserve the original loss otherwise."""
+    if bool(enabled) and int(epoch) >= int(warmup_epochs):
+        return base_loss + float(weight) * coverage_loss, float(weight)
+    return base_loss, 0.0
+
+
 if __name__ == '__main__':
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA is required for temporal-memory training.')
@@ -764,6 +779,44 @@ if __name__ == '__main__':
         if trajectory_warmup_epochs < 0:
             raise ValueError(
                 'TEMPORAL_FRAME.trajectory_extrapolation_warmup_epochs must be non-negative.'
+            )
+    target_coverage_enabled = bool(
+        getattr(cfg, 'temporal_memory_target_coverage_enabled', False)
+    )
+    target_coverage_weight = float(
+        getattr(cfg, 'temporal_memory_target_coverage_weight', 0.005)
+    )
+    target_coverage_warmup_epochs = int(
+        getattr(cfg, 'temporal_memory_target_coverage_warmup_epochs', 1)
+    )
+    target_coverage_score_floor = float(
+        getattr(cfg, 'temporal_memory_target_coverage_score_floor', 0.719)
+    )
+    target_coverage_correct_fraction = float(
+        getattr(
+            cfg,
+            'temporal_memory_target_coverage_correct_fraction',
+            0.0001,
+        )
+    )
+    if target_coverage_enabled:
+        if target_coverage_weight <= 0.0:
+            raise ValueError(
+                'TEMPORAL_MEMORY.target_coverage_weight must be positive.'
+            )
+        if target_coverage_warmup_epochs < 0:
+            raise ValueError(
+                'TEMPORAL_MEMORY.target_coverage_warmup_epochs must be '
+                'non-negative.'
+            )
+        if not 0.0 < target_coverage_score_floor < 1.0:
+            raise ValueError(
+                'TEMPORAL_MEMORY.target_coverage_score_floor must be in (0, 1).'
+            )
+        if not 0.0 < target_coverage_correct_fraction <= 1.0:
+            raise ValueError(
+                'TEMPORAL_MEMORY.target_coverage_correct_fraction must be '
+                'in (0, 1].'
             )
     metric_aux_enabled = bool(
         getattr(cfg, 'temporal_memory_metric_aux_enabled', False)
@@ -922,6 +975,18 @@ if __name__ == '__main__':
     else:
         print('initialized P23 base weights from:', initialized_from)
     print('learning-rate scheduler:', cfg.scheduler)
+    if target_coverage_enabled:
+        print(
+            'target-time coverage loss: enabled (weight={}, '
+            'warmup_epochs={}, score_floor={}, correct_fraction={})'.format(
+                target_coverage_weight,
+                target_coverage_warmup_epochs,
+                target_coverage_score_floor,
+                target_coverage_correct_fraction,
+            )
+        )
+    else:
+        print('target-time coverage loss: disabled')
     if confidence_only_enabled:
         print('confidence calibration mode: backbone and memory frozen')
 
@@ -944,6 +1009,10 @@ if __name__ == '__main__':
         positive_weight_sum = 0.0
         trajectory_loss_sum = 0.0
         confidence_loss_sum = 0.0
+        target_coverage_loss_sum = 0.0
+        target_coverage_weighted_loss_sum = 0.0
+        target_coverage_group_count = 0
+        target_coverage_uncovered_count = 0
         metric_target_loss_sum = 0.0
         metric_component_loss_sum = 0.0
         batch_count = 0
@@ -964,6 +1033,12 @@ if __name__ == '__main__':
             event_x = batch['event_x'].to(device, non_blocking=True)
             labels = batch['labels'].to(device, non_blocking=True)
             target_ids = batch['target_ids'].to(device, non_blocking=True)
+            event_timestamps = None
+            if target_coverage_enabled:
+                event_timestamps = batch['event_timestamps'].to(
+                    device,
+                    non_blocking=True,
+                )
 
             optimizer.zero_grad(set_to_none=True)
             model_output = model(frames)
@@ -988,6 +1063,35 @@ if __name__ == '__main__':
                 ),
                 max_positive_weight=cfg.temporal_memory_max_positive_weight,
             )
+            target_coverage_loss = None
+            target_coverage_stats = {
+                'target_group_count': 0,
+                'uncovered_group_count': 0,
+            }
+            target_coverage_applied_weight = 0.0
+            if target_coverage_enabled:
+                target_coverage_loss, target_coverage_stats = (
+                    target_time_group_coverage_loss(
+                        event_logits,
+                        labels,
+                        target_ids,
+                        torch.zeros_like(event_time_indices),
+                        event_timestamps,
+                        temporal_bin_size=int(cfg.temporal_memory_bin_size),
+                        score_floor=target_coverage_score_floor,
+                        correct_fraction=target_coverage_correct_fraction,
+                    )
+                )
+                loss, target_coverage_applied_weight = (
+                    apply_target_coverage_loss(
+                        loss,
+                        target_coverage_loss,
+                        target_coverage_enabled,
+                        epoch,
+                        target_coverage_warmup_epochs,
+                        target_coverage_weight,
+                    )
+                )
             confidence_loss = event_logits.sum() * 0.0
             if confidence_head_enabled:
                 event_confidence_logits = confidence_logit_maps[
@@ -1064,6 +1168,21 @@ if __name__ == '__main__':
             positive_weight_sum += diagnostics['mean_positive_weight']
             trajectory_loss_sum += float(trajectory_loss.detach().item())
             confidence_loss_sum += float(confidence_loss.detach().item())
+            target_coverage_loss_value = (
+                0.0
+                if target_coverage_loss is None
+                else float(target_coverage_loss.detach().item())
+            )
+            target_coverage_loss_sum += target_coverage_loss_value
+            target_coverage_weighted_loss_sum += (
+                target_coverage_applied_weight * target_coverage_loss_value
+            )
+            target_coverage_group_count += int(
+                target_coverage_stats['target_group_count']
+            )
+            target_coverage_uncovered_count += int(
+                target_coverage_stats['uncovered_group_count']
+            )
             metric_target_loss_sum += float(metric_target_loss.detach().item())
             metric_component_loss_sum += float(metric_component_loss.detach().item())
             batch_count += 1
@@ -1073,6 +1192,16 @@ if __name__ == '__main__':
                 pos_w='{:.2f}'.format(positive_weight_sum / batch_count),
                 traj='{:.5f}'.format(trajectory_loss_sum / batch_count),
                 conf='{:.5f}'.format(confidence_loss_sum / batch_count),
+                coverage='{:.5f}'.format(
+                    target_coverage_loss_sum / batch_count
+                ),
+                coverage_w='{:.6f}'.format(
+                    target_coverage_weighted_loss_sum / batch_count
+                ),
+                coverage_miss='{:.4f}'.format(
+                    target_coverage_uncovered_count
+                    / max(target_coverage_group_count, 1)
+                ),
                 metric_pd='{:.5f}'.format(metric_target_loss_sum / batch_count),
                 metric_fa='{:.5f}'.format(metric_component_loss_sum / batch_count),
             )
@@ -1126,6 +1255,19 @@ if __name__ == '__main__':
                 best_loss,
             )
         )
+        if target_coverage_enabled:
+            print(
+                'epoch {} coverage: raw_loss={:.6f}, weighted_loss={:.6f}, '
+                'groups={}, uncovered={}, miss_rate={:.6f}'.format(
+                    epoch,
+                    target_coverage_loss_sum / max(batch_count, 1),
+                    target_coverage_weighted_loss_sum / max(batch_count, 1),
+                    target_coverage_group_count,
+                    target_coverage_uncovered_count,
+                    target_coverage_uncovered_count
+                    / max(target_coverage_group_count, 1),
+                )
+            )
 
     summary = {
         'started_at': started_at.isoformat(timespec='seconds'),

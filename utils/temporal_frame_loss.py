@@ -530,6 +530,119 @@ def target_group_coverage_loss(
     }
 
 
+def target_time_group_coverage_loss(
+    logits,
+    labels,
+    target_ids,
+    event_batch_indices,
+    event_timestamps,
+    temporal_bin_size=50,
+    score_floor=0.719,
+    correct_fraction=0.0001,
+):
+    """Match the Challenge 2 Pd decision for each target and open time bin.
+
+    The evaluator treats timestamps exactly on a bin boundary as outside both
+    neighbouring open intervals.  Every remaining ``(batch, target ID, time
+    bin)`` group contributes equally.  Its kth-highest logit must reach the
+    configured score floor, where k is the official correct-event fraction
+    rounded up.
+
+    Unlike :func:`target_group_coverage_loss`, this function accepts original
+    timestamps and therefore remains correct for multi-frame memory sequences.
+    """
+    inputs = (
+        logits,
+        labels,
+        target_ids,
+        event_batch_indices,
+        event_timestamps,
+    )
+    if not all(value.ndim == 1 for value in inputs):
+        raise ValueError('Target-time coverage inputs must be flat tensors.')
+    if not all(value.shape == logits.shape for value in inputs[1:]):
+        raise ValueError(
+            'Target-time coverage inputs must have matching shapes.'
+        )
+
+    temporal_bin_size = int(temporal_bin_size)
+    score_floor = float(score_floor)
+    correct_fraction = float(correct_fraction)
+    if temporal_bin_size <= 0:
+        raise ValueError('temporal_bin_size must be positive.')
+    if not 0.0 < score_floor < 1.0:
+        raise ValueError('score_floor must be in (0, 1).')
+    if not 0.0 < correct_fraction <= 1.0:
+        raise ValueError('correct_fraction must be in (0, 1].')
+    empty_stats = {
+        'target_group_count': 0,
+        'uncovered_group_count': 0,
+    }
+    if logits.numel() == 0:
+        return logits.sum() * 0.0, empty_stats
+
+    event_timestamps = event_timestamps.long()
+    if torch.any(event_timestamps < 0):
+        raise ValueError('event_timestamps must be non-negative.')
+    labels = labels.float()
+    target_ids = target_ids.long()
+    event_batch_indices = event_batch_indices.long()
+    target_mask = (
+        (labels > 0.5)
+        & (target_ids != 0)
+        & (torch.remainder(event_timestamps, temporal_bin_size) != 0)
+    )
+    if not torch.any(target_mask):
+        return logits.sum() * 0.0, empty_stats
+
+    target_logits = logits[target_mask]
+    group_coordinates = torch.stack(
+        (
+            event_batch_indices[target_mask],
+            target_ids[target_mask],
+            torch.div(
+                event_timestamps[target_mask],
+                temporal_bin_size,
+                rounding_mode='floor',
+            ),
+        ),
+        dim=1,
+    )
+    _, inverse = torch.unique(
+        group_coordinates,
+        dim=0,
+        sorted=True,
+        return_inverse=True,
+    )
+    group_count = int(inverse.max().item()) + 1
+    floor_logit = math.log(score_floor / (1.0 - score_floor))
+    group_losses = []
+    for group_index in range(group_count):
+        group_logits = target_logits[inverse == group_index]
+        required_count = max(
+            1,
+            int(math.ceil(group_logits.numel() * correct_fraction)),
+        )
+        kth_logit = torch.topk(
+            group_logits,
+            k=required_count,
+            largest=True,
+            sorted=False,
+        ).values.min()
+        group_losses.append(
+            functional.relu(kth_logit.new_tensor(floor_logit) - kth_logit)
+        )
+
+    group_loss_tensor = torch.stack(group_losses)
+    uncovered_group_count = int(
+        (group_loss_tensor.detach() > 0.0).sum().item()
+    )
+    return group_loss_tensor.mean(), {
+        'target_group_count': group_count,
+        'uncovered_group_count': uncovered_group_count,
+    }
+
+
 def trajectory_extrapolation_loss(
     logits,
     target_centers,

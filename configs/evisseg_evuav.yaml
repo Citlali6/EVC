@@ -269,6 +269,15 @@ TEMPORAL_MEMORY:
   # legacy dense-multiplier behavior above.
   temporal_memory_density_bucket_boundaries: []
   temporal_memory_density_bucket_views: []
+  # M24: kth-event training surrogate aligned with the raw-score portion of
+  # the official open-interval Pd rule. Final routing/postprocessing is still
+  # assessed only by the complete validation evaluator.
+  # Disabled by default so released checkpoints and historical runs are unchanged.
+  temporal_memory_target_coverage_enabled: false
+  temporal_memory_target_coverage_weight: 0.005
+  temporal_memory_target_coverage_warmup_epochs: 1
+  temporal_memory_target_coverage_score_floor: 0.719
+  temporal_memory_target_coverage_correct_fraction: 0.0001
   # Training-only loss terms aligned with Challenge 2 Pd and false components.
   temporal_memory_metric_aux_enabled: false
   temporal_memory_metric_target_weight: 0.01

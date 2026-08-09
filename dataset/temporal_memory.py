@@ -424,6 +424,7 @@ class TemporalMemoryTrainDataset(Dataset):
 
         frames = []
         event_time_indices = []
+        event_timestamps = []
         event_x = []
         event_y = []
         labels = []
@@ -448,6 +449,9 @@ class TemporalMemoryTrainDataset(Dataset):
             event_time_indices.append(
                 np.full(event_indices.shape, sequence_index, dtype=np.int64)
             )
+            event_timestamps.append(
+                locations[:, 2].astype(np.int64, copy=False)
+            )
             event_x.append(locations[:, 0].astype(np.int64, copy=False))
             event_y.append(locations[:, 1].astype(np.int64, copy=False))
             labels.append(video.labels[event_indices].astype(np.float32, copy=False))
@@ -460,6 +464,7 @@ class TemporalMemoryTrainDataset(Dataset):
         return {
             'frames': np.stack(frames, axis=0),
             'event_time_indices': np.concatenate(event_time_indices),
+            'event_timestamps': np.concatenate(event_timestamps),
             'event_x': np.concatenate(event_x),
             'event_y': np.concatenate(event_y),
             'labels': np.concatenate(labels),
@@ -476,6 +481,9 @@ def temporal_memory_collate(samples):
         'frames': torch.from_numpy(sample['frames']).float(),
         'event_time_indices': torch.from_numpy(
             sample['event_time_indices']
+        ).long(),
+        'event_timestamps': torch.from_numpy(
+            sample['event_timestamps']
         ).long(),
         'event_x': torch.from_numpy(sample['event_x']).long(),
         'event_y': torch.from_numpy(sample['event_y']).long(),

@@ -8,7 +8,6 @@ import tqdm
 
 from configs.configs import cfg
 from dataset.ev_uav import EvUAV
-from model.evspsegnet import evspsegnet
 from utils.density_threshold import DensityAdaptiveThresholdConfig
 from utils.ensemble import ChallengePredictor
 from utils.inference_chunks import (
@@ -103,10 +102,12 @@ if __name__ == "__main__":
             // temporal_frame_config.fine_temporal_bin_size
         )
     temporal_frame_only = temporal_frame_config.frame_only
-    temporal_memory_only = temporal_memory_config.enabled
+    temporal_memory_only = temporal_memory_config.memory_only
     full_stream_only = temporal_frame_only or temporal_memory_only
     predictor = None
     if not full_stream_only:
+        from model.evspsegnet import evspsegnet
+
         predictor = ChallengePredictor(cfg, device, evspsegnet)
     temporal_frame_model = None
     if temporal_frame_config.enabled:
@@ -375,6 +376,69 @@ if __name__ == "__main__":
                         predictions,
                         frame_scores,
                         temporal_frame_config.sparse_weight,
+                    )
+                if temporal_memory_config.enabled:
+                    memory_scores = predict_temporal_memory_scores(
+                        temporal_memory_model,
+                        frame_video,
+                        device,
+                        cfg.temporal_memory_context_bins,
+                        cfg.res[0],
+                        cfg.res[1],
+                        cfg.temporal_memory_inference_batch_size,
+                        cfg.temporal_memory_log_count_clip,
+                    )
+                    use_secondary = temporal_memory_config.use_secondary_for_event_count(
+                        event_count
+                    )
+                    if temporal_memory_secondary_model is not None:
+                        if use_secondary:
+                            memory_scores = predict_temporal_memory_scores(
+                                temporal_memory_secondary_model,
+                                frame_video,
+                                device,
+                                cfg.temporal_memory_context_bins,
+                                cfg.res[0],
+                                cfg.res[1],
+                                cfg.temporal_memory_inference_batch_size,
+                                cfg.temporal_memory_log_count_clip,
+                            )
+                        elif not temporal_memory_config.routes_secondary_by_event_count:
+                            secondary_scores = predict_temporal_memory_scores(
+                                temporal_memory_secondary_model,
+                                frame_video,
+                                device,
+                                cfg.temporal_memory_context_bins,
+                                cfg.res[0],
+                                cfg.res[1],
+                                cfg.temporal_memory_inference_batch_size,
+                                cfg.temporal_memory_log_count_clip,
+                            )
+                            memory_scores = blend_temporal_memory_scores(
+                                memory_scores,
+                                secondary_scores,
+                                temporal_memory_config.primary_weight,
+                            )
+                    if temporal_memory_blend_model is not None and not use_secondary:
+                        blend_scores = predict_temporal_memory_scores(
+                            temporal_memory_blend_model,
+                            frame_video,
+                            device,
+                            cfg.temporal_memory_context_bins,
+                            cfg.res[0],
+                            cfg.res[1],
+                            cfg.temporal_memory_inference_batch_size,
+                            cfg.temporal_memory_log_count_clip,
+                        )
+                        memory_scores = blend_temporal_memory_scores(
+                            memory_scores,
+                            blend_scores,
+                            temporal_memory_config.blend_primary_weight,
+                        )
+                    predictions = blend_temporal_frame_scores(
+                        predictions,
+                        memory_scores,
+                        temporal_memory_config.sparse_weight,
                     )
             if not full_stream_only and chunk_config.should_partition(event_count):
                 p8_partitioned_videos += 1

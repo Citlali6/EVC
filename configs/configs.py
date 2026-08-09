@@ -50,7 +50,7 @@ def get_parser():
 
     args_cfg, unknown = parser.parse_known_args()
     assert args_cfg.config is not None
-    with open(args_cfg.config, 'r') as f:
+    with open(args_cfg.config, 'r', encoding='utf-8') as f:
         config = yaml.load(f, Loader=yaml.CLoader)
     if not isinstance(config, dict):
         raise TypeError('The configuration root must be a YAML mapping.')

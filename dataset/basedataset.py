@@ -1,8 +1,44 @@
+import importlib
+
 import torch
 import numpy as np
 from torch.autograd import Function
-import HAIS_OP
-import spconv.pytorch as spconv
+
+
+HAIS_OP = None
+spconv = None
+
+
+def _load_hais_op():
+    """Load the custom voxelization extension only for sparse inference."""
+    global HAIS_OP
+    if HAIS_OP is None:
+        try:
+            HAIS_OP = importlib.import_module('HAIS_OP')
+        except (ImportError, OSError) as exc:
+            raise RuntimeError(
+                'HAIS_OP is required for sparse event voxelization. Build the '
+                'extension in lib/hais_ops with the active PyTorch/CUDA '
+                'environment (use the documented WSL setup on Windows), or run '
+                'pure temporal inference with sparse_weight=0.'
+            ) from exc
+    return HAIS_OP
+
+
+def _load_spconv():
+    """Load spconv only when a sparse batch is materialized."""
+    global spconv
+    if spconv is None:
+        try:
+            spconv = importlib.import_module('spconv.pytorch')
+        except (ImportError, OSError) as exc:
+            raise RuntimeError(
+                'spconv is required to build sparse event tensors. Install a '
+                'spconv build compatible with the active PyTorch/CUDA '
+                'environment (use the documented WSL setup on Windows), or run '
+                'pure temporal inference with sparse_weight=0.'
+            ) from exc
+    return spconv
 
 class Voxelization_Idx(Function):
     @staticmethod
@@ -24,7 +60,10 @@ class Voxelization_Idx(Function):
         input_map = torch.IntTensor(N).zero_()
         output_map = input_map.new()
 
-        HAIS_OP.voxelize_idx(coords, output_coords, input_map, output_map, batchsize, mode)
+        hais_op = _load_hais_op()
+        hais_op.voxelize_idx(
+            coords, output_coords, input_map, output_map, batchsize, mode
+        )
         return output_coords, input_map, output_map
 
     @staticmethod
@@ -51,7 +90,10 @@ class Voxelization(Function):
 
         ctx.for_backwards = (map_rule, mode, maxActive, N)
 
-        HAIS_OP.voxelize_fp(feats, output_feats, map_rule, mode, M, maxActive, C)
+        hais_op = _load_hais_op()
+        hais_op.voxelize_fp(
+            feats, output_feats, map_rule, mode, M, maxActive, C
+        )
         return output_feats
 
     @staticmethod
@@ -61,7 +103,16 @@ class Voxelization(Function):
 
         d_feats = torch.cuda.FloatTensor(N, C).zero_()
 
-        HAIS_OP.voxelize_bp(d_output_feats.contiguous(), d_feats, map_rule, mode, M, maxActive, C)
+        hais_op = _load_hais_op()
+        hais_op.voxelize_bp(
+            d_output_feats.contiguous(),
+            d_feats,
+            map_rule,
+            mode,
+            M,
+            maxActive,
+            C,
+        )
         return d_feats, None, None
 voxelization = Voxelization.apply
 
@@ -81,6 +132,7 @@ class BaseDataLoader(torch.utils.data.Dataset):
 
     @staticmethod
     def custom_collate(batch):
+        spconv_module = _load_spconv()
         batch_size = len(batch)
         loc_batches=[]
         feature_batches=[]
@@ -125,7 +177,12 @@ class BaseDataLoader(torch.utils.data.Dataset):
 
 
         spatial_shape = np.array([11*32,9*32,256*32])
-        voxel_ev = spconv.SparseConvTensor(voxel_feats, voxel_locs.int().cuda(), spatial_shape, batch_size)
+        voxel_ev = spconv_module.SparseConvTensor(
+            voxel_feats,
+            voxel_locs.int().cuda(),
+            spatial_shape,
+            batch_size,
+        )
 
         output = {}
 

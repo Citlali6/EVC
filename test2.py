@@ -11,7 +11,6 @@ import tqdm
 
 from configs.configs import cfg
 from dataset.ev_uav import EvUAV
-from model.evspsegnet import evspsegnet
 from utils.challenge_eval import add_batch_to_evaluator, evaluate_challenge_metrics
 from utils.density_threshold import DensityAdaptiveThresholdConfig
 from utils.ensemble import ChallengePredictor
@@ -78,6 +77,8 @@ if __name__ == "__main__":
     full_stream_only = temporal_frame_only or temporal_memory_only
     predictor = None
     if not full_stream_only:
+        from model.evspsegnet import evspsegnet
+
         predictor = ChallengePredictor(cfg, device, evspsegnet)
     temporal_frame_model = None
     if temporal_frame_config.enabled:

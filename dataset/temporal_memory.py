@@ -111,6 +111,50 @@ def normalize_min_event_count_exclusive(value):
     return normalized
 
 
+def sparse_target_support_bins(video, max_events=3):
+    """Return time bins containing a genuinely sparse labelled target.
+
+    A target-time group is eligible when it contains between one and
+    ``max_events`` positive events and has a strictly positive target id.
+    ``video.event_bins`` already uses the dataset's metric-time binning, so
+    the training configuration's 50-unit bins are preserved exactly.
+    """
+    if isinstance(max_events, (bool, np.bool_)):
+        raise ValueError('max_events must be a positive integer.')
+    try:
+        max_events = int(max_events)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError('max_events must be a positive integer.') from error
+    if max_events <= 0:
+        raise ValueError('max_events must be a positive integer.')
+
+    event_bins = np.asarray(video.event_bins, dtype=np.int64).reshape(-1)
+    labels = np.asarray(video.labels).reshape(-1)
+    target_ids = np.asarray(video.target_ids, dtype=np.int64).reshape(-1)
+    if not (
+        event_bins.shape[0] == labels.shape[0] == target_ids.shape[0]
+    ):
+        raise ValueError('video event bins, labels, and target ids must align.')
+
+    positive_target = (labels > 0.5) & (target_ids > 0)
+    if not np.any(positive_target):
+        return np.empty(0, dtype=np.int64)
+    target_time_pairs = np.stack(
+        (event_bins[positive_target], target_ids[positive_target]),
+        axis=1,
+    )
+    unique_pairs, support = np.unique(
+        target_time_pairs,
+        axis=0,
+        return_counts=True,
+    )
+    eligible = (support >= 1) & (support <= max_events)
+    return np.unique(unique_pairs[eligible, 0]).astype(
+        np.int64,
+        copy=False,
+    )
+
+
 def temporal_memory_views_by_video(
     event_counts,
     views_per_video,
@@ -215,6 +259,9 @@ class TemporalMemoryTrainDataset(Dataset):
         density_bucket_boundaries=None,
         density_bucket_views=None,
         min_event_count_exclusive=None,
+        sparse_target_support_sampling_enabled=False,
+        sparse_target_support_max_events=3,
+        sparse_target_support_probability=0.75,
     ):
         self.root = Path(root)
         self.whole_t = int(whole_t)
@@ -235,6 +282,55 @@ class TemporalMemoryTrainDataset(Dataset):
         self.min_event_count_exclusive = normalize_min_event_count_exclusive(
             min_event_count_exclusive
         )
+        self.sparse_target_support_sampling_enabled = bool(
+            sparse_target_support_sampling_enabled
+        )
+        if isinstance(sparse_target_support_max_events, (bool, np.bool_)):
+            raise ValueError(
+                'sparse_target_support_max_events must be a positive integer.'
+            )
+        try:
+            self.sparse_target_support_max_events = int(
+                sparse_target_support_max_events
+            )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError(
+                'sparse_target_support_max_events must be a positive integer.'
+            ) from error
+        if (
+            self.sparse_target_support_max_events <= 0
+            or self.sparse_target_support_max_events
+            != sparse_target_support_max_events
+        ):
+            raise ValueError(
+                'sparse_target_support_max_events must be a positive integer.'
+            )
+        if isinstance(sparse_target_support_probability, (bool, np.bool_)):
+            raise ValueError(
+                'sparse_target_support_probability must be in [0, 1].'
+            )
+        try:
+            self.sparse_target_support_probability = float(
+                sparse_target_support_probability
+            )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError(
+                'sparse_target_support_probability must be in [0, 1].'
+            ) from error
+        if not (
+            np.isfinite(self.sparse_target_support_probability)
+            and 0.0 <= self.sparse_target_support_probability <= 1.0
+        ):
+            raise ValueError(
+                'sparse_target_support_probability must be in [0, 1].'
+            )
+        if (
+            self.sparse_target_support_sampling_enabled
+            and self.temporal_bin_size != 50
+        ):
+            raise ValueError(
+                'Sparse-target-support sampling requires 50-unit time bins.'
+            )
         (
             self.density_bucket_boundaries,
             self.density_bucket_views,
@@ -304,6 +400,29 @@ class TemporalMemoryTrainDataset(Dataset):
                         'sequence_length exceeds the available temporal bins.'
                 )
                 self._videos[video_index] = video
+
+        self.sparse_target_support_bins_by_video = ()
+        self.sparse_target_support_video_count = 0
+        self.sparse_target_support_bin_count = 0
+        if self.sparse_target_support_sampling_enabled:
+            sparse_bins = []
+            for video_index in range(len(self.file_paths)):
+                video = self._videos.get(video_index)
+                if video is None:
+                    video = self._load_video(video_index)
+                sparse_bins.append(
+                    sparse_target_support_bins(
+                        video,
+                        max_events=self.sparse_target_support_max_events,
+                    )
+                )
+            self.sparse_target_support_bins_by_video = tuple(sparse_bins)
+            self.sparse_target_support_video_count = sum(
+                bins.size > 0 for bins in sparse_bins
+            )
+            self.sparse_target_support_bin_count = sum(
+                bins.size for bins in sparse_bins
+            )
 
         needs_event_counts = (
             self.dense_sampling_enabled
@@ -422,7 +541,7 @@ class TemporalMemoryTrainDataset(Dataset):
             mode = 'dense_multiplier'
         else:
             mode = 'uniform'
-        return {
+        summary = {
             'mode': mode,
             'source_video_count': self.source_video_count,
             'video_count': len(self.file_paths),
@@ -448,6 +567,29 @@ class TemporalMemoryTrainDataset(Dataset):
             ),
             'density_bucket_view_delta': self.density_bucket_view_delta,
         }
+        if self.sparse_target_support_sampling_enabled:
+            summary.update(
+                {
+                    'sparse_target_support_sampling_enabled': True,
+                    'sparse_target_support_max_events': (
+                        self.sparse_target_support_max_events
+                    ),
+                    'sparse_target_support_probability': (
+                        self.sparse_target_support_probability
+                    ),
+                    'sparse_target_support_video_count': (
+                        self.sparse_target_support_video_count
+                    ),
+                    'sparse_target_support_bin_count': (
+                        self.sparse_target_support_bin_count
+                    ),
+                    'sparse_target_support_bin_counts_by_video': [
+                        int(bins.size)
+                        for bins in self.sparse_target_support_bins_by_video
+                    ],
+                }
+            )
+        return summary
 
     def _sample_center_bin(self, video_index, view_index, video):
         source_video_index = int(self.source_video_indices[int(video_index)])
@@ -458,6 +600,16 @@ class TemporalMemoryTrainDataset(Dataset):
             + view_index
         )
         rng = np.random.default_rng(seed)
+        if self.sparse_target_support_sampling_enabled:
+            sparse_bins = self.sparse_target_support_bins_by_video[
+                int(video_index)
+            ]
+            use_sparse_target = (
+                sparse_bins.size > 0
+                and rng.random() < self.sparse_target_support_probability
+            )
+            if use_sparse_target:
+                return int(sparse_bins[rng.integers(sparse_bins.size)])
         use_positive = (
             video.positive_bins.size > 0
             and rng.random() < self.positive_frame_probability

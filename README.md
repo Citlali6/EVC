@@ -65,10 +65,11 @@ M20 的 attention 输出投影采用零初始化。因此从 M15 加载时预测
 
 | 文件 | 用途 | SHA-256 |
 | --- | --- | --- |
+| `checkpoints/m4_dacc_m5_best_loss_seed42.pt` | 完整重训链条的版本化起点 | M13-FT30 的初始化模型 |
 | `checkpoints/m10_dense_views2_epoch_002_seed42.pt` | 固定低密度路由模型 | `5C89C89A165469C0A4E8286D4644D60D2F82CF5775EDBB724F626E24E67D8935` |
 | `checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt` | 固定高密度 M20 模型 | `4B8B2B19EA9D913EE4E52CB21AE52BF945B2B0F3CEFD5CB5AB6F64D51BF49849` |
 
-直接评估当前最优方案只需要上表两份权重。
+直接评估当前最优方案只需要 M10 和 M20；M4 只在下文的完整重训链条中使用。
 
 ## 仓库结构
 
@@ -82,7 +83,6 @@ EVSOD-main/
 |-- train_temporal_memory.py     # M20 训练入口
 |-- test2.py                     # 本地 Challenge 2 验证
 |-- submit_challenge2.py         # 提交 TXT 生成
-|-- note.md                      # 本地实验日志，不上传 Git
 `-- README.md                    # 当前最优方案复现文档
 ```
 
@@ -150,10 +150,16 @@ dataset/训练集、验证集/
 `-- val_Challenge2.py
 ```
 
-数据集不随 Git 发布。官方数据可从 EV-UAV benchmark 发布页提供的百度网盘或 Google Drive
-链接下载。
+数据集不随 Git 发布。官方数据可从[百度网盘](https://pan.baidu.com/s/15pAlu3KP1uXych-c3SC5qA?pwd=sbr2)
+（提取码 `sbr2`）或 [Google Drive](https://drive.google.com/drive/folders/1VIkBFx5Po0KPIFBYOL_appLVie5wgdyi?usp=drive_link) 下载。
 
-## **免训练评估**
+## 复现流程
+
+本仓库提供两条路径：路径 1 直接验证已发布的当前最高分，适合提交和结果核对；路径 2 从仓库
+版本化的 M4+DACC+M5 起点按完整训练链条重新生成 M20，适合研究复现。两条路径都使用前文完成的
+环境配置和数据目录。
+
+### 1. **免训练评估**：直接复现当前最高分
 
 下列命令直接使用仓库中的 M10/M20 权重，按当前固定策略在 24 个验证视频上评估，不需要训练。
 在已验证 GPU 环境中通常需要数分钟。
@@ -201,7 +207,104 @@ Score_Fa: 0.9541549752
 Score:    0.9628776542
 ```
 
-## 生成 Challenge 2 提交文件
+### 2. 从版本化起点完整重训 M20
+
+当前 M20 的完整训练链为：M4+DACC+M5 -> M13-FT30 epoch 003 -> M15 epoch 008 ->
+M20 attention epoch 003。每一步均只读取 `train/`；最终分数使用第 1 步的完整 `test2.py`
+验证。训练时间较长，且不同硬件环境可能产生轻微数值差异。
+
+#### 2.1 训练 M13-FT30
+
+M13-FT30 从仓库提供的 M4+DACC+M5 checkpoint 初始化，固定训练 30 个 epoch。即使训练 loss
+在其他轮更低，后续链条固定使用 epoch 003。
+
+```bash
+M4_CKPT="$PROJECT_DIR/checkpoints/m4_dacc_m5_best_loss_seed42.pt"
+M13_ROOT="$PROJECT_DIR/log/m13_dense_views4_ft30_seed42"
+
+python train_temporal_memory.py --config configs/evisseg_evuav.yaml --set \
+  DATA.root="$DATA_ROOT" \
+  TRAIN.seed=42 TRAIN.epochs=30 TRAIN.batch_size=1 TRAIN.lr=0.00002 \
+  TRAIN.scheduler=cosine TRAIN.scheduler_min_lr=0.000001 \
+  TRAIN.checkpoint_interval=1 TRAIN.model_save_root="$M13_ROOT" \
+  TEMPORAL_MEMORY.temporal_memory_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_init_model_path="$M4_CKPT" \
+  TEMPORAL_MEMORY.temporal_memory_base_lr_multiplier=1.0 \
+  TEMPORAL_MEMORY.temporal_memory_memory_lr_multiplier=1.0 \
+  TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled=false \
+  TEMPORAL_MEMORY.temporal_memory_dense_sampling_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_dense_event_count_cutoff=200000 \
+  TEMPORAL_MEMORY.temporal_memory_dense_view_multiplier=4 \
+  TEMPORAL_FRAME.temporal_frame_density_calibration_enabled=true \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_enabled=true \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_weight=0.05 \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_margin_logit=1.0 \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_min_points=3 \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_warmup_epochs=3
+
+M13_E3="$(find "$M13_ROOT/runs" -type f -name 'epoch_003_seed42.pt' -print -quit)"
+test -n "$M13_E3"
+```
+
+#### 2.2 训练 M15
+
+M15 从 M13-FT30 epoch 003 低学习率续训 8 个 epoch。固定使用 M15 epoch 008 作为下一步初始化，
+不要以训练 loss 最低的 epoch 004 替代。
+
+```bash
+M15_ROOT="$PROJECT_DIR/log/m15_e3_low_lr_seed43"
+
+python train_temporal_memory.py --config configs/evisseg_evuav.yaml --set \
+  DATA.root="$DATA_ROOT" \
+  TRAIN.seed=43 TRAIN.epochs=8 TRAIN.batch_size=1 TRAIN.lr=0.000003 \
+  TRAIN.scheduler=cosine TRAIN.scheduler_min_lr=0.0000003 \
+  TRAIN.checkpoint_interval=1 TRAIN.model_save_root="$M15_ROOT" \
+  TEMPORAL_MEMORY.temporal_memory_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_init_model_path="$M13_E3" \
+  TEMPORAL_MEMORY.temporal_memory_base_lr_multiplier=1.0 \
+  TEMPORAL_MEMORY.temporal_memory_memory_lr_multiplier=1.0 \
+  TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled=false \
+  TEMPORAL_MEMORY.temporal_memory_dense_sampling_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_dense_event_count_cutoff=200000 \
+  TEMPORAL_MEMORY.temporal_memory_dense_view_multiplier=4 \
+  TEMPORAL_FRAME.temporal_frame_density_calibration_enabled=true \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_enabled=false
+
+M15_E8="$(find "$M15_ROOT/runs" -type f -name 'epoch_008_seed43.pt' -print -quit)"
+test -n "$M15_E8"
+```
+
+#### 2.3 训练 M20 attention
+
+M20 在 M15 epoch 008 上附加零初始化时序自注意力残差。训练保存每轮 checkpoint；当前固定使用
+epoch 003，而非训练 loss 最低的 epoch 011。
+
+```bash
+M20_ROOT="$PROJECT_DIR/log/m20_attn_dense_views8_e12_seed48"
+
+python train_temporal_memory.py --config configs/evisseg_evuav.yaml --set \
+  DATA.root="$DATA_ROOT" \
+  TRAIN.seed=48 TRAIN.epochs=12 TRAIN.batch_size=1 \
+  TRAIN.lr=0.000001 TRAIN.scheduler=cosine TRAIN.scheduler_min_lr=0.0000001 \
+  TRAIN.checkpoint_interval=1 TRAIN.model_save_root="$M20_ROOT" \
+  TEMPORAL_MEMORY.temporal_memory_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_init_model_path="$M15_E8" \
+  TEMPORAL_MEMORY.temporal_memory_dense_sampling_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_dense_event_count_cutoff=200000 \
+  TEMPORAL_MEMORY.temporal_memory_dense_view_multiplier=8 \
+  TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true \
+  TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled=false \
+  TEMPORAL_FRAME.temporal_frame_density_calibration_enabled=true \
+  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_enabled=false
+
+M20_E3="$(find "$M20_ROOT/runs" -type f -name 'epoch_003_seed48.pt' -print -quit)"
+test -n "$M20_E3"
+```
+
+将第 1 步中的 `M20_CKPT` 改为 `$M20_E3`，使用完全相同的完整验证命令评估重新训练的模型。只有
+完整验证达到或超过预期时，才可用该新权重替换发布的 M20 checkpoint。
+
+### 3. 生成 Challenge 2 提交文件
 
 提交必须使用与 **免训练评估** 完全相同的 M10/M20 权重及固定参数，只将验证选项替换为输出目录：
 
@@ -241,8 +344,16 @@ cd "$OUTPUT_DIR"
 zip -j ../m20_e3_m10low30000.zip val_*.txt
 ```
 
-## 实验日志
+## 引用
 
-`note.md` 是本地实验日志，持续记录每次训练配置、保存点的完整验证分数、融合扫描、采用或淘汰
-结论，以及下一步的研究假设。它不上传 Git，不作为公开复现材料；当前可复现方案始终以本 README
-为准。
+```bibtex
+@misc{chen2025eventbasedtinyobjectdetection,
+  title={Event-based Tiny Object Detection: A Benchmark Dataset and Baseline},
+  author={Nuo Chen and Chao Xiao and Yimian Dai and Shiman He and Miao Li and Wei An},
+  year={2025},
+  eprint={2506.23575},
+  archivePrefix={arXiv},
+  primaryClass={cs.CV},
+  url={https://arxiv.org/abs/2506.23575}
+}
+```

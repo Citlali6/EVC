@@ -39,6 +39,12 @@ ALLOWED_RESUME_CONFIG_DIFFERENCES = frozenset(
         ('TEST', 'challenge_output_dir'),
     }
 )
+LEGACY_RESUME_CONFIG_DEFAULTS = {
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_freeze_base_enabled',
+    ): False,
+}
 
 
 def load_checkpoint_file(path, map_location='cpu'):
@@ -155,6 +161,16 @@ def _config_difference_paths(saved, current, path=()):
         for key in sorted(set(saved).union(current)):
             child_path = path + (str(key),)
             if key not in saved or key not in current:
+                legacy_default = LEGACY_RESUME_CONFIG_DEFAULTS.get(child_path)
+                present_value = (
+                    current[key] if key in current else saved[key]
+                )
+                if (
+                    child_path in LEGACY_RESUME_CONFIG_DEFAULTS
+                    and type(present_value) is type(legacy_default)
+                    and present_value == legacy_default
+                ):
+                    continue
                 if child_path not in ALLOWED_RESUME_CONFIG_DIFFERENCES:
                     differences.append(child_path)
                 continue
@@ -225,6 +241,22 @@ def build_training_checkpoint(
     include_cuda_rng=True,
 ):
     """Build an epoch-boundary snapshot that can resume deterministically."""
+    freeze_base_enabled = bool(
+        getattr(config, 'temporal_memory_freeze_base_enabled', False)
+    )
+    confidence_only_enabled = bool(
+        getattr(config, 'temporal_memory_confidence_only_enabled', False)
+    )
+    trainable_parameter_count = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    )
+    frozen_parameter_count = sum(
+        parameter.numel()
+        for parameter in model.parameters()
+        if not parameter.requires_grad
+    )
     return {
         'checkpoint_format_version': RESUME_CHECKPOINT_FORMAT_VERSION,
         'model_state_dict': model.state_dict(),
@@ -270,7 +302,10 @@ def build_training_checkpoint(
                 getattr(config, 'temporal_frame_confidence_head_enabled', False)
             ),
             'confidence_only_enabled': bool(
-                getattr(config, 'temporal_memory_confidence_only_enabled', False)
+                confidence_only_enabled
+            ),
+            'freeze_base_enabled': bool(
+                freeze_base_enabled
             ),
             'temporal_attention_enabled': bool(
                 getattr(
@@ -295,6 +330,17 @@ def build_training_checkpoint(
                 else str(Path(resume_parent_checkpoint).resolve())
             ),
             'git': git_provenance or {'commit': None, 'dirty': None},
+            'training_scope': {
+                'name': (
+                    'confidence_only'
+                    if confidence_only_enabled
+                    else 'memory_only'
+                    if freeze_base_enabled
+                    else 'all'
+                ),
+                'trainable_parameter_count': int(trainable_parameter_count),
+                'frozen_parameter_count': int(frozen_parameter_count),
+            },
         },
     }
 
@@ -567,6 +613,48 @@ def load_p23_base_weights(
     return checkpoint_path
 
 
+def configure_temporal_memory_trainable_parameters(
+    model,
+    confidence_only_enabled=False,
+    freeze_base_enabled=False,
+):
+    """Apply an explicit, checkpoint-neutral temporal training scope."""
+    confidence_only_enabled = bool(confidence_only_enabled)
+    freeze_base_enabled = bool(freeze_base_enabled)
+    if confidence_only_enabled and freeze_base_enabled:
+        raise ValueError(
+            'Temporal-memory confidence-only and freeze-base modes are '
+            'mutually exclusive.'
+        )
+    if confidence_only_enabled:
+        if not model.confidence_head_enabled:
+            raise ValueError(
+                'Confidence-only mode requires the confidence head to be enabled.'
+            )
+        confidence_parameter_ids = {
+            id(parameter) for parameter in model.base.confidence_head.parameters()
+        }
+        for parameter in model.parameters():
+            parameter.requires_grad_(id(parameter) in confidence_parameter_ids)
+    elif freeze_base_enabled:
+        model.base.requires_grad_(False)
+
+
+def set_temporal_memory_training_mode(
+    model,
+    confidence_only_enabled=False,
+    freeze_base_enabled=False,
+):
+    """Set module modes without re-enabling a frozen base at each epoch."""
+    if bool(confidence_only_enabled):
+        model.eval()
+        model.base.confidence_head.train()
+        return
+    model.train()
+    if bool(freeze_base_enabled):
+        model.base.eval()
+
+
 def build_optimizer(model, config, confidence_only_enabled=False):
     base_multiplier = float(config.temporal_memory_base_lr_multiplier)
     memory_multiplier = float(config.temporal_memory_memory_lr_multiplier)
@@ -581,7 +669,11 @@ def build_optimizer(model, config, confidence_only_enabled=False):
         raise ValueError('Temporal-memory learning-rate multipliers must be positive.')
     confidence_parameters = []
     if model.confidence_head_enabled:
-        confidence_parameters = list(model.base.confidence_head.parameters())
+        confidence_parameters = [
+            parameter
+            for parameter in model.base.confidence_head.parameters()
+            if parameter.requires_grad
+        ]
     confidence_parameter_ids = {id(parameter) for parameter in confidence_parameters}
     if confidence_only_enabled:
         if not confidence_parameters:
@@ -601,20 +693,39 @@ def build_optimizer(model, config, confidence_only_enabled=False):
     base_parameters = [
         parameter
         for parameter in model.base.parameters()
-        if id(parameter) not in confidence_parameter_ids
+        if parameter.requires_grad
+        and id(parameter) not in confidence_parameter_ids
     ]
-    memory_parameters = list(model.forward_memory.parameters())
-    memory_parameters += list(model.backward_memory.parameters())
-    memory_parameters += list(model.memory_projection.parameters())
+    memory_parameters = [
+        parameter
+        for parameter in model.forward_memory.parameters()
+        if parameter.requires_grad
+    ]
+    memory_parameters += [
+        parameter
+        for parameter in model.backward_memory.parameters()
+        if parameter.requires_grad
+    ]
+    memory_parameters += [
+        parameter
+        for parameter in model.memory_projection.parameters()
+        if parameter.requires_grad
+    ]
     if getattr(model, 'temporal_attention_enabled', False):
-        memory_parameters += list(model.temporal_attn.parameters())
-    parameter_groups = [
-        {
-            'name': 'base',
-            'params': base_parameters,
-            'lr': float(config.lr) * base_multiplier,
-        },
-    ]
+        memory_parameters += [
+            parameter
+            for parameter in model.temporal_attn.parameters()
+            if parameter.requires_grad
+        ]
+    parameter_groups = []
+    if base_parameters:
+        parameter_groups.append(
+            {
+                'name': 'base',
+                'params': base_parameters,
+                'lr': float(config.lr) * base_multiplier,
+            }
+        )
     if confidence_parameters:
         parameter_groups.append(
             {
@@ -623,13 +734,16 @@ def build_optimizer(model, config, confidence_only_enabled=False):
                 'lr': float(config.lr) * confidence_multiplier,
             }
         )
-    parameter_groups.append(
-        {
-            'name': 'memory',
-            'params': memory_parameters,
-            'lr': float(config.lr) * memory_multiplier,
-        }
-    )
+    if memory_parameters:
+        parameter_groups.append(
+            {
+                'name': 'memory',
+                'params': memory_parameters,
+                'lr': float(config.lr) * memory_multiplier,
+            }
+        )
+    if not parameter_groups:
+        raise ValueError('Temporal-memory optimizer has no trainable parameters.')
     return optim.AdamW(parameter_groups, weight_decay=1e-4)
 
 
@@ -640,7 +754,7 @@ def memory_config_summary(config):
         'target_positive_loss_mass={}, max_positive_weight={}, '
         'base_lr_multiplier={}, memory_lr_multiplier={}, '
         'confidence_lr_multiplier={}, '
-        'attention_enabled={})'
+        'attention_enabled={}, freeze_base_enabled={})'
     ).format(
         config.temporal_memory_bin_size,
         config.temporal_memory_context_bins,
@@ -654,6 +768,7 @@ def memory_config_summary(config):
         config.temporal_memory_memory_lr_multiplier,
         getattr(config, 'temporal_memory_confidence_lr_multiplier', 1.0),
         bool(getattr(config, 'temporal_memory_temporal_attention_enabled', False)),
+        bool(getattr(config, 'temporal_memory_freeze_base_enabled', False)),
     )
 
 
@@ -879,10 +994,18 @@ if __name__ == '__main__':
     confidence_only_enabled = bool(
         getattr(cfg, 'temporal_memory_confidence_only_enabled', False)
     )
+    freeze_base_enabled = bool(
+        getattr(cfg, 'temporal_memory_freeze_base_enabled', False)
+    )
     if confidence_only_enabled and not confidence_head_enabled:
         raise ValueError(
             'TEMPORAL_MEMORY.confidence_only_enabled requires '
             'TEMPORAL_FRAME.confidence_head_enabled=true.'
+        )
+    if confidence_only_enabled and freeze_base_enabled:
+        raise ValueError(
+            'TEMPORAL_MEMORY.confidence_only_enabled and '
+            'TEMPORAL_MEMORY.freeze_base_enabled are mutually exclusive.'
         )
     confidence_calibration_weight = float(
         getattr(cfg, 'temporal_frame_confidence_calibration_weight', 0.1)
@@ -911,12 +1034,11 @@ if __name__ == '__main__':
             density_calibration_enabled=density_calibration_enabled,
             confidence_head_enabled=confidence_head_enabled,
         )
-    if confidence_only_enabled:
-        confidence_parameter_ids = {
-            id(parameter) for parameter in model.base.confidence_head.parameters()
-        }
-        for parameter in model.parameters():
-            parameter.requires_grad = id(parameter) in confidence_parameter_ids
+    configure_temporal_memory_trainable_parameters(
+        model,
+        confidence_only_enabled=confidence_only_enabled,
+        freeze_base_enabled=freeze_base_enabled,
+    )
     optimizer = build_optimizer(model, cfg, confidence_only_enabled)
     scheduler = build_scheduler(optimizer, cfg)
     start_epoch = 0
@@ -997,13 +1119,11 @@ if __name__ == '__main__':
     )
     for epoch in range(start_epoch, int(cfg.epochs)):
         dataset.set_epoch(epoch)
-        if confidence_only_enabled:
-            # Keep the released M5 representation deterministic and train only
-            # the newly attached head.
-            model.eval()
-            model.base.confidence_head.train()
-        else:
-            model.train()
+        set_temporal_memory_training_mode(
+            model,
+            confidence_only_enabled=confidence_only_enabled,
+            freeze_base_enabled=freeze_base_enabled,
+        )
         loss_sum = 0.0
         positive_fraction_sum = 0.0
         positive_weight_sum = 0.0

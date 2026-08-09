@@ -313,4 +313,7 @@ TEMPORAL_MEMORY:
   # Calibration-only mode freezes the released M5 backbone and trains only
   # the newly attached confidence head.
   temporal_memory_confidence_only_enabled: false
+  # M25: keep the released frame backbone, density calibrator, and output head
+  # byte-stable while updating only the bidirectional memory modules.
+  temporal_memory_freeze_base_enabled: false
   temporal_memory_temporal_attention_enabled: false

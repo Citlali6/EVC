@@ -56,6 +56,7 @@ def make_config():
         'TEMPORAL_MEMORY': {
             'temporal_memory_sequence_length': 16,
             'temporal_memory_train_views_per_video': 2,
+            'temporal_memory_freeze_base_enabled': False,
         },
     }
     return SimpleNamespace(
@@ -68,6 +69,7 @@ def make_config():
         temporal_frame_trajectory_extrapolation_enabled=False,
         temporal_frame_confidence_head_enabled=False,
         temporal_memory_confidence_only_enabled=False,
+        temporal_memory_freeze_base_enabled=False,
         temporal_memory_temporal_attention_enabled=True,
         resolved_config=resolved_config,
         config_overrides=['TRAIN.epochs=8'],
@@ -112,6 +114,12 @@ class TemporalMemoryResumeTests(unittest.TestCase):
              'metric_target_weight', 0.01),
             ('TRAIN.epochs', 'TRAIN', 'epochs', 9),
             ('TRAIN.scheduler_t_max', 'TRAIN', 'scheduler_t_max', 8),
+            (
+                'TEMPORAL_MEMORY.temporal_memory_freeze_base_enabled',
+                'TEMPORAL_MEMORY',
+                'temporal_memory_freeze_base_enabled',
+                True,
+            ),
         )
         for expected_path, section, key, value in changes:
             with self.subTest(path=expected_path):
@@ -182,6 +190,17 @@ class TemporalMemoryResumeTests(unittest.TestCase):
         self.assertEqual(
             checkpoint['provenance']['config_overrides'], ['TRAIN.epochs=8']
         )
+        self.assertFalse(
+            checkpoint['temporal_memory']['freeze_base_enabled']
+        )
+        self.assertEqual(
+            checkpoint['provenance']['training_scope'],
+            {
+                'name': 'all',
+                'trainable_parameter_count': 8,
+                'frozen_parameter_count': 0,
+            },
+        )
 
         expected_python = random.random()
         expected_numpy = np.random.random()
@@ -251,6 +270,29 @@ class TemporalMemoryResumeTests(unittest.TestCase):
                     scheduler,
                     current_config=make_config(),
                 )
+
+    def test_legacy_resolved_config_treats_missing_freeze_flag_as_false(self):
+        saved_config = make_config()
+        del saved_config.resolved_config['TEMPORAL_MEMORY'][
+            'temporal_memory_freeze_base_enabled'
+        ]
+        checkpoint = {
+            'provenance': {
+                'resolved_config': copy.deepcopy(saved_config.resolved_config)
+            }
+        }
+
+        validate_resume_config(checkpoint, make_config())
+
+        freeze_enabled = make_config()
+        freeze_enabled.resolved_config['TEMPORAL_MEMORY'][
+            'temporal_memory_freeze_base_enabled'
+        ] = True
+        with self.assertRaisesRegex(
+            ValueError,
+            'TEMPORAL_MEMORY.temporal_memory_freeze_base_enabled',
+        ):
+            validate_resume_config(checkpoint, freeze_enabled)
 
     def test_optimizer_group_name_or_order_change_is_rejected(self):
         model = torch.nn.Linear(2, 1)

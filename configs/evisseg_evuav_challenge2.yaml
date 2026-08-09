@@ -271,6 +271,7 @@ TEMPORAL_MEMORY:
   temporal_memory_dacc_v2_enabled: false
   temporal_memory_dacc_v2_only_enabled: false
   temporal_memory_dacc_v2_lr_multiplier: 1.0
+  temporal_memory_attention_projection_only_enabled: false
 
 ENSEMBLE:
   # E1: disabled by default; TEST.model_path remains the primary checkpoint.

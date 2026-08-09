@@ -73,6 +73,10 @@ LEGACY_RESUME_CONFIG_DEFAULTS = {
         'TEMPORAL_MEMORY',
         'temporal_memory_dacc_v2_lr_multiplier',
     ): 1.0,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_attention_projection_only_enabled',
+    ): False,
 }
 HEAD_ONLY_MUTABLE_STATE_KEYS = frozenset(
     {
@@ -83,6 +87,21 @@ HEAD_ONLY_MUTABLE_STATE_KEYS = frozenset(
 DACC_V2_MUTABLE_STATE_KEYS = frozenset(
     {
         'base.density_calibrator.residual_projection.weight',
+    }
+)
+ATTENTION_PROJECTION_MUTABLE_STATE_KEYS = frozenset(
+    {
+        'temporal_attn.output_projection.weight',
+        'temporal_attn.output_projection.bias',
+    }
+)
+TEMPORAL_ATTENTION_STATE_KEYS = frozenset(
+    {
+        'temporal_attn.attention.in_proj_weight',
+        'temporal_attn.attention.in_proj_bias',
+        'temporal_attn.attention.out_proj.weight',
+        'temporal_attn.attention.out_proj.bias',
+        *ATTENTION_PROJECTION_MUTABLE_STATE_KEYS,
     }
 )
 
@@ -117,6 +136,7 @@ def resolve_temporal_memory_training_scope(
     freeze_base_enabled=False,
     head_only_enabled=False,
     dacc_v2_only_enabled=False,
+    attention_projection_only_enabled=False,
 ):
     """Resolve the mutually exclusive temporal-memory training scope."""
     enabled = [
@@ -126,13 +146,17 @@ def resolve_temporal_memory_training_scope(
             ('memory_only', freeze_base_enabled),
             ('event_head_only', head_only_enabled),
             ('dacc_v2_projection_only', dacc_v2_only_enabled),
+            (
+                'temporal_attention_projection_only',
+                attention_projection_only_enabled,
+            ),
         )
         if bool(active)
     ]
     if len(enabled) > 1:
         raise ValueError(
-            'Temporal-memory confidence-only, freeze-base, head-only, and '
-            'DACC-v2-only '
+            'Temporal-memory confidence-only, freeze-base, head-only, '
+            'DACC-v2-only, and attention-projection-only '
             'modes are mutually exclusive: {}.'.format(', '.join(enabled))
         )
     return enabled[0] if enabled else 'all'
@@ -249,6 +273,23 @@ def validate_dacc_v2_training_config(config, training_scope):
     if bool(getattr(config, 'temporal_frame_confidence_head_enabled', False)):
         raise ValueError(
             'The controlled DACC-v2 experiment requires confidence head off.'
+        )
+
+
+def validate_attention_projection_training_config(config, training_scope):
+    """Require an existing temporal-attention branch for projection tuning."""
+    if training_scope != 'temporal_attention_projection_only':
+        return
+    if not bool(
+        getattr(
+            config,
+            'temporal_memory_temporal_attention_enabled',
+            False,
+        )
+    ):
+        raise ValueError(
+            'Attention-projection-only mode requires '
+            'TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true.'
         )
 
 
@@ -538,6 +579,13 @@ def build_training_checkpoint(
     dacc_v2_only_enabled = bool(
         getattr(config, 'temporal_memory_dacc_v2_only_enabled', False)
     )
+    attention_projection_only_enabled = bool(
+        getattr(
+            config,
+            'temporal_memory_attention_projection_only_enabled',
+            False,
+        )
+    )
     density_calibration_enabled = bool(
         getattr(
             config,
@@ -591,6 +639,9 @@ def build_training_checkpoint(
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     trainable_parameter_count = sum(
         parameter.numel()
@@ -612,6 +663,8 @@ def build_training_checkpoint(
         audited_mutable_keys = HEAD_ONLY_MUTABLE_STATE_KEYS
     elif training_scope == 'dacc_v2_projection_only':
         audited_mutable_keys = DACC_V2_MUTABLE_STATE_KEYS
+    elif training_scope == 'temporal_attention_projection_only':
+        audited_mutable_keys = ATTENTION_PROJECTION_MUTABLE_STATE_KEYS
     if audited_mutable_keys is not None:
         if not frozen_state_reference_sha256:
             raise ValueError(
@@ -647,6 +700,9 @@ def build_training_checkpoint(
         'freeze_base_enabled': bool(freeze_base_enabled),
         'head_only_enabled': bool(head_only_enabled),
         'dacc_v2_only_enabled': bool(dacc_v2_only_enabled),
+        'attention_projection_only_enabled': bool(
+            attention_projection_only_enabled
+        ),
         'temporal_attention_enabled': bool(
             getattr(
                 config,
@@ -802,6 +858,15 @@ def load_training_resume(
     ):
         expected_scope = 'dacc_v2_projection_only'
         expected_mutable_keys = DACC_V2_MUTABLE_STATE_KEYS
+    elif bool(
+        getattr(
+            current_config,
+            'temporal_memory_attention_projection_only_enabled',
+            False,
+        )
+    ):
+        expected_scope = 'temporal_attention_projection_only'
+        expected_mutable_keys = ATTENTION_PROJECTION_MUTABLE_STATE_KEYS
     if expected_scope is not None:
         training_scope = checkpoint.get('provenance', {}).get(
             'training_scope',
@@ -1145,12 +1210,33 @@ def validate_head_only_initialization_checkpoint(checkpoint_path):
         )
 
 
+def validate_attention_projection_initialization_checkpoint(checkpoint_path):
+    """Require a complete, already-trained temporal-attention parent."""
+    checkpoint = load_checkpoint_file(checkpoint_path, map_location='cpu')
+    metadata = checkpoint.get('temporal_memory')
+    if not isinstance(metadata, dict) or not bool(
+        metadata.get('temporal_attention_enabled', False)
+    ):
+        raise ValueError(
+            'Attention-projection-only mode requires a complete '
+            'temporal-attention checkpoint.'
+        )
+    state = checkpoint.get('model_state_dict', {})
+    missing = sorted(TEMPORAL_ATTENTION_STATE_KEYS.difference(state))
+    if missing:
+        raise ValueError(
+            'Attention-projection initialization checkpoint is missing: '
+            '{}.'.format(missing)
+        )
+
+
 def configure_temporal_memory_trainable_parameters(
     model,
     confidence_only_enabled=False,
     freeze_base_enabled=False,
     head_only_enabled=False,
     dacc_v2_only_enabled=False,
+    attention_projection_only_enabled=False,
 ):
     """Apply an explicit, checkpoint-neutral temporal training scope."""
     training_scope = resolve_temporal_memory_training_scope(
@@ -1158,6 +1244,9 @@ def configure_temporal_memory_trainable_parameters(
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     if training_scope == 'confidence_only':
         if not model.confidence_head_enabled:
@@ -1243,6 +1332,47 @@ def configure_temporal_memory_trainable_parameters(
                     trainable_count
                 )
             )
+    elif training_scope == 'temporal_attention_projection_only':
+        projection = (
+            None
+            if not getattr(model, 'temporal_attention_enabled', False)
+            or model.temporal_attn is None
+            else model.temporal_attn.output_projection
+        )
+        if projection is None:
+            raise ValueError(
+                'Attention-projection-only mode requires temporal attention.'
+            )
+        projection_parameter_ids = {
+            id(parameter) for parameter in projection.parameters()
+        }
+        for parameter in model.parameters():
+            parameter.requires_grad_(
+                id(parameter) in projection_parameter_ids
+            )
+        trainable_names = {
+            name
+            for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        }
+        if trainable_names != ATTENTION_PROJECTION_MUTABLE_STATE_KEYS:
+            raise RuntimeError(
+                'Attention-projection trainable parameters are {} instead '
+                'of {}.'.format(
+                    sorted(trainable_names),
+                    sorted(ATTENTION_PROJECTION_MUTABLE_STATE_KEYS),
+                )
+            )
+        trainable_count = sum(
+            parameter.numel()
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        )
+        if trainable_count != 9312:
+            raise RuntimeError(
+                'Attention-projection-only mode expected 9312 trainable '
+                'parameters, got {}.'.format(trainable_count)
+            )
 
 
 def set_temporal_memory_training_mode(
@@ -1251,6 +1381,7 @@ def set_temporal_memory_training_mode(
     freeze_base_enabled=False,
     head_only_enabled=False,
     dacc_v2_only_enabled=False,
+    attention_projection_only_enabled=False,
 ):
     """Set module modes without re-enabling a frozen base at each epoch."""
     training_scope = resolve_temporal_memory_training_scope(
@@ -1258,6 +1389,9 @@ def set_temporal_memory_training_mode(
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     if training_scope == 'confidence_only':
         model.eval()
@@ -1271,6 +1405,10 @@ def set_temporal_memory_training_mode(
         model.eval()
         model.base.density_calibrator.residual_projection.train()
         return
+    if training_scope == 'temporal_attention_projection_only':
+        model.eval()
+        model.temporal_attn.output_projection.train()
+        return
     model.train()
     if training_scope == 'memory_only':
         model.base.eval()
@@ -1282,6 +1420,7 @@ def build_optimizer(
     confidence_only_enabled=False,
     head_only_enabled=False,
     dacc_v2_only_enabled=False,
+    attention_projection_only_enabled=False,
 ):
     base_multiplier = float(config.temporal_memory_base_lr_multiplier)
     memory_multiplier = float(config.temporal_memory_memory_lr_multiplier)
@@ -1302,6 +1441,9 @@ def build_optimizer(
         confidence_only_enabled=confidence_only_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     if bool(head_only_enabled):
         head_parameters = [
@@ -1344,6 +1486,39 @@ def build_optimizer(
                     'name': 'dacc_v2',
                     'params': projection_parameters,
                     'lr': float(config.lr) * dacc_v2_multiplier,
+                }
+            ],
+            weight_decay=0.0,
+        )
+    if bool(attention_projection_only_enabled):
+        projection = (
+            None
+            if not getattr(model, 'temporal_attention_enabled', False)
+            or model.temporal_attn is None
+            else model.temporal_attn.output_projection
+        )
+        if projection is None:
+            raise ValueError(
+                'Attention-projection-only mode requires temporal attention.'
+            )
+        projection_parameters = [
+            parameter
+            for parameter in projection.parameters()
+            if parameter.requires_grad
+        ]
+        if len(projection_parameters) != 2 or sum(
+            parameter.numel() for parameter in projection_parameters
+        ) != 9312:
+            raise RuntimeError(
+                'Attention-projection optimizer requires exactly two tensors '
+                'and 9312 parameters.'
+            )
+        return optim.AdamW(
+            [
+                {
+                    'name': 'temporal_attention_projection',
+                    'params': projection_parameters,
+                    'lr': float(config.lr),
                 }
             ],
             weight_decay=0.0,
@@ -1437,6 +1612,7 @@ def memory_config_summary(config):
         'confidence_lr_multiplier={}, '
         'attention_enabled={}, freeze_base_enabled={}, head_only_enabled={}, '
         'dacc_v2_enabled={}, dacc_v2_only_enabled={}, '
+        'attention_projection_only_enabled={}, '
         'min_event_count_exclusive={})'
     ).format(
         config.temporal_memory_bin_size,
@@ -1455,6 +1631,13 @@ def memory_config_summary(config):
         bool(getattr(config, 'temporal_memory_head_only_enabled', False)),
         bool(getattr(config, 'temporal_memory_dacc_v2_enabled', False)),
         bool(getattr(config, 'temporal_memory_dacc_v2_only_enabled', False)),
+        bool(
+            getattr(
+                config,
+                'temporal_memory_attention_projection_only_enabled',
+                False,
+            )
+        ),
         getattr(
             config,
             'temporal_memory_train_min_event_count_exclusive',
@@ -1513,11 +1696,21 @@ if __name__ == '__main__':
     dacc_v2_only_enabled = bool(
         getattr(cfg, 'temporal_memory_dacc_v2_only_enabled', False)
     )
+    attention_projection_only_enabled = bool(
+        getattr(
+            cfg,
+            'temporal_memory_attention_projection_only_enabled',
+            False,
+        )
+    )
     training_scope = resolve_temporal_memory_training_scope(
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     if confidence_only_enabled and not confidence_head_enabled:
         raise ValueError(
@@ -1526,6 +1719,7 @@ if __name__ == '__main__':
         )
     validate_head_only_training_config(cfg, training_scope)
     validate_dacc_v2_training_config(cfg, training_scope)
+    validate_attention_projection_training_config(cfg, training_scope)
 
     resume_checkpoint_value = str(
         getattr(cfg, 'resume_checkpoint', '')
@@ -1751,12 +1945,19 @@ if __name__ == '__main__':
         initialized_from_sha256 = sha256_file(initialized_from)
         if head_only_enabled:
             validate_head_only_initialization_checkpoint(initialized_from)
+        if attention_projection_only_enabled:
+            validate_attention_projection_initialization_checkpoint(
+                initialized_from
+            )
     configure_temporal_memory_trainable_parameters(
         model,
         confidence_only_enabled=confidence_only_enabled,
         freeze_base_enabled=freeze_base_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     optimizer = build_optimizer(
         model,
@@ -1764,6 +1965,9 @@ if __name__ == '__main__':
         confidence_only_enabled=confidence_only_enabled,
         head_only_enabled=head_only_enabled,
         dacc_v2_only_enabled=dacc_v2_only_enabled,
+        attention_projection_only_enabled=(
+            attention_projection_only_enabled
+        ),
     )
     optimizer_parameters = [
         parameter
@@ -1809,6 +2013,8 @@ if __name__ == '__main__':
         audited_mutable_state_keys = HEAD_ONLY_MUTABLE_STATE_KEYS
     elif dacc_v2_only_enabled:
         audited_mutable_state_keys = DACC_V2_MUTABLE_STATE_KEYS
+    elif attention_projection_only_enabled:
+        audited_mutable_state_keys = ATTENTION_PROJECTION_MUTABLE_STATE_KEYS
     if audited_mutable_state_keys is not None:
         if resume_parent_checkpoint is None:
             frozen_state_reference_sha256 = frozen_model_state_sha256(
@@ -1886,6 +2092,12 @@ if __name__ == '__main__':
             'frozen state sha256:',
             frozen_state_reference_sha256,
         )
+    if attention_projection_only_enabled:
+        print(
+            'Temporal-attention output-projection-only mode: 9312 parameters '
+            'trainable; frozen state sha256:',
+            frozen_state_reference_sha256,
+        )
 
     last_checkpoint_path = (
         resume_parent_checkpoint
@@ -1900,6 +2112,9 @@ if __name__ == '__main__':
             freeze_base_enabled=freeze_base_enabled,
             head_only_enabled=head_only_enabled,
             dacc_v2_only_enabled=dacc_v2_only_enabled,
+            attention_projection_only_enabled=(
+                attention_projection_only_enabled
+            ),
         )
         loss_sum = 0.0
         positive_fraction_sum = 0.0

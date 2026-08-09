@@ -3,6 +3,7 @@
 import json
 import os
 import random
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,352 @@ from utils.temporal_frame_loss import (
     frame_balanced_event_bce,
     trajectory_extrapolation_loss_memory,
 )
+
+
+RESUME_CHECKPOINT_FORMAT_VERSION = 2
+ALLOWED_RESUME_CONFIG_DIFFERENCES = frozenset(
+    {
+        ('TRAIN', 'resume_checkpoint'),
+        ('TRAIN', 'model_save_root'),
+        ('TEST', 'challenge_output_dir'),
+    }
+)
+
+
+def load_checkpoint_file(path, map_location='cpu'):
+    """Load trusted local checkpoints across PyTorch's weights-only change."""
+    try:
+        return torch.load(
+            path,
+            map_location=map_location,
+            weights_only=False,
+        )
+    except TypeError:
+        # PyTorch releases predating the ``weights_only`` argument.
+        return torch.load(path, map_location=map_location)
+
+
+def capture_rng_state(include_cuda=True):
+    """Capture every global RNG used by the training process.
+
+    CUDA state collection is best-effort so checkpointing is still usable on
+    CPU-only machines and in environments where CUDA was compiled in but
+    cannot be initialized.
+    """
+    state = {
+        'python': random.getstate(),
+        'numpy': np.random.get_state(),
+        'torch_cpu': torch.get_rng_state(),
+    }
+    if include_cuda and torch.cuda.is_available():
+        try:
+            state['torch_cuda'] = torch.cuda.get_rng_state_all()
+        except (RuntimeError, AssertionError):
+            state['torch_cuda'] = None
+    return state
+
+
+def restore_rng_state(state):
+    """Restore a state produced by :func:`capture_rng_state`."""
+    if not isinstance(state, dict):
+        raise ValueError('Resume checkpoint RNG state must be a mapping.')
+    required = {'python', 'numpy', 'torch_cpu'}
+    missing = sorted(required.difference(state))
+    if missing:
+        raise ValueError(
+            'Resume checkpoint RNG state is missing: {}.'.format(
+                ', '.join(missing)
+            )
+        )
+    random.setstate(state['python'])
+    np.random.set_state(state['numpy'])
+    torch.set_rng_state(state['torch_cpu'].cpu())
+    cuda_state = state.get('torch_cuda')
+    if cuda_state is not None and torch.cuda.is_available():
+        try:
+            torch.cuda.set_rng_state_all(cuda_state)
+        except (RuntimeError, AssertionError) as error:
+            raise RuntimeError(
+                'Could not restore CUDA RNG state from resume checkpoint.'
+            ) from error
+
+
+def collect_git_provenance(repository_root=None):
+    """Return the current Git commit and dirty flag without requiring Git."""
+    root = Path(repository_root or Path(__file__).resolve().parent)
+    provenance = {'commit': None, 'dirty': None}
+    try:
+        commit = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=str(root),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            cwd=str(root),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return provenance
+    provenance['commit'] = commit or None
+    provenance['dirty'] = bool(status.strip())
+    return provenance
+
+
+def is_resumable_checkpoint(checkpoint):
+    """Distinguish complete training snapshots from model-only checkpoints."""
+    if not isinstance(checkpoint, dict):
+        return False
+    if int(checkpoint.get('checkpoint_format_version', 0)) < 2:
+        return False
+    required = {
+        'model_state_dict',
+        'optimizer_state_dict',
+        'optimizer_class',
+        'scheduler_state_dict',
+        'scheduler_class',
+        'rng_state',
+        'start_epoch',
+        'next_epoch',
+        'best_loss',
+        'best_epoch',
+    }
+    return required.issubset(checkpoint)
+
+
+def _config_difference_paths(saved, current, path=()):
+    """Return leaf paths that differ between two resolved configurations."""
+    if path in ALLOWED_RESUME_CONFIG_DIFFERENCES:
+        return []
+    if isinstance(saved, dict) and isinstance(current, dict):
+        differences = []
+        for key in sorted(set(saved).union(current)):
+            child_path = path + (str(key),)
+            if key not in saved or key not in current:
+                if child_path not in ALLOWED_RESUME_CONFIG_DIFFERENCES:
+                    differences.append(child_path)
+                continue
+            differences.extend(
+                _config_difference_paths(
+                    saved[key],
+                    current[key],
+                    child_path,
+                )
+            )
+        return differences
+    if saved != current:
+        return [path]
+    return []
+
+
+def validate_resume_config(checkpoint, current_config):
+    """Enforce resume as an exact continuation, not a fine-tuning shortcut."""
+    provenance = checkpoint.get('provenance')
+    saved_config = (
+        provenance.get('resolved_config')
+        if isinstance(provenance, dict)
+        else None
+    )
+    current_resolved = getattr(
+        current_config,
+        'resolved_config',
+        current_config,
+    )
+    if not isinstance(saved_config, dict):
+        raise ValueError(
+            'Resume checkpoint is missing its resolved training configuration.'
+        )
+    if not isinstance(current_resolved, dict):
+        raise TypeError('Current resolved training configuration must be a mapping.')
+    differences = _config_difference_paths(saved_config, current_resolved)
+    if differences:
+        rendered = ', '.join(
+            '.'.join(path) if path else '<root>'
+            for path in differences[:12]
+        )
+        if len(differences) > 12:
+            rendered += ', ... ({} total)'.format(len(differences))
+        raise ValueError(
+            'Resume requires the identical resolved training configuration, '
+            'including TRAIN.epochs and scheduler horizon. Only '
+            'TRAIN.resume_checkpoint, TRAIN.model_save_root, and the '
+            'submission output directory may differ. Changed: {}.'.format(
+                rendered
+            )
+        )
+
+
+def build_training_checkpoint(
+    model,
+    optimizer,
+    scheduler,
+    epoch,
+    epoch_loss,
+    best_loss,
+    best_epoch,
+    config,
+    initialized_from,
+    resume_parent_checkpoint=None,
+    run_start_epoch=0,
+    best_loss_checkpoint=None,
+    git_provenance=None,
+    include_cuda_rng=True,
+):
+    """Build an epoch-boundary snapshot that can resume deterministically."""
+    return {
+        'checkpoint_format_version': RESUME_CHECKPOINT_FORMAT_VERSION,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'optimizer_class': optimizer.__class__.__qualname__,
+        'scheduler_state_dict': scheduler.state_dict(),
+        'scheduler_class': scheduler.__class__.__qualname__,
+        'rng_state': capture_rng_state(include_cuda=include_cuda_rng),
+        # ``epoch`` is the completed zero-based epoch. ``next_epoch`` is the
+        # exact dataset/scheduler epoch at which a resumed process must start.
+        'start_epoch': int(run_start_epoch),
+        'epoch': int(epoch),
+        'next_epoch': int(epoch) + 1,
+        'loss': float(epoch_loss),
+        'best_loss': float(best_loss),
+        'best_epoch': None if best_epoch is None else int(best_epoch),
+        'best_loss_checkpoint': (
+            None
+            if best_loss_checkpoint is None
+            else str(Path(best_loss_checkpoint).resolve())
+        ),
+        'temporal_memory': {
+            'temporal_bin_size': int(config.temporal_memory_bin_size),
+            'context_bins': int(config.temporal_memory_context_bins),
+            'width': int(config.temporal_memory_width),
+            'sequence_length': int(config.temporal_memory_sequence_length),
+            'log_count_clip': float(config.temporal_memory_log_count_clip),
+            'density_calibration_enabled': bool(
+                getattr(
+                    config,
+                    'temporal_frame_density_calibration_enabled',
+                    False,
+                )
+            ),
+            'trajectory_extrapolation_enabled': bool(
+                getattr(
+                    config,
+                    'temporal_frame_trajectory_extrapolation_enabled',
+                    False,
+                )
+            ),
+            'confidence_head_enabled': bool(
+                getattr(config, 'temporal_frame_confidence_head_enabled', False)
+            ),
+            'confidence_only_enabled': bool(
+                getattr(config, 'temporal_memory_confidence_only_enabled', False)
+            ),
+            'temporal_attention_enabled': bool(
+                getattr(
+                    config,
+                    'temporal_memory_temporal_attention_enabled',
+                    False,
+                )
+            ),
+        },
+        'provenance': {
+            'saved_at': datetime.now().astimezone().isoformat(timespec='seconds'),
+            'resolved_config': config.resolved_config,
+            'config_overrides': list(config.config_overrides),
+            'initialized_from': (
+                None
+                if initialized_from is None
+                else str(Path(initialized_from).resolve())
+            ),
+            'resume_parent_checkpoint': (
+                None
+                if resume_parent_checkpoint is None
+                else str(Path(resume_parent_checkpoint).resolve())
+            ),
+            'git': git_provenance or {'commit': None, 'dirty': None},
+        },
+    }
+
+
+def load_training_resume(
+    checkpoint_path,
+    model,
+    optimizer,
+    scheduler,
+    current_config,
+    restore_rng=True,
+):
+    """Restore a complete training snapshot and return its epoch metadata.
+
+    Historical checkpoints intentionally remain model-only initialization
+    inputs. They should be passed through
+    ``TEMPORAL_MEMORY.temporal_memory_init_model_path`` rather than silently
+    pretending that optimizer, scheduler, and RNG state were recoverable.
+    """
+    checkpoint_path = Path(str(checkpoint_path).strip())
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            'Resume checkpoint not found: {}'.format(checkpoint_path)
+        )
+    checkpoint = load_checkpoint_file(checkpoint_path, map_location='cpu')
+    if not is_resumable_checkpoint(checkpoint):
+        raise ValueError(
+            '{} is a legacy/model-only checkpoint and cannot be resumed. '
+            'Use TEMPORAL_MEMORY.temporal_memory_init_model_path to use it '
+            'as initialization instead.'.format(checkpoint_path)
+        )
+    validate_resume_config(checkpoint, current_config)
+    start_epoch = int(checkpoint['next_epoch'])
+    if start_epoch < 0:
+        raise ValueError('Resume checkpoint next_epoch must be non-negative.')
+    completed_epoch = int(checkpoint.get('epoch', start_epoch - 1))
+    if start_epoch != completed_epoch + 1:
+        raise ValueError(
+            'Resume checkpoint has inconsistent epoch={} and next_epoch={}.'.format(
+                completed_epoch, start_epoch
+            )
+        )
+    if checkpoint['optimizer_class'] != optimizer.__class__.__qualname__:
+        raise ValueError(
+            'Resume optimizer class {} does not match configured {}.'.format(
+                checkpoint['optimizer_class'], optimizer.__class__.__qualname__
+            )
+        )
+    if checkpoint['scheduler_class'] != scheduler.__class__.__qualname__:
+        raise ValueError(
+            'Resume scheduler class {} does not match configured {}.'.format(
+                checkpoint['scheduler_class'], scheduler.__class__.__qualname__
+            )
+        )
+    saved_groups = checkpoint['optimizer_state_dict'].get('param_groups', [])
+    current_groups = optimizer.state_dict().get('param_groups', [])
+    saved_group_names = tuple(group.get('name') for group in saved_groups)
+    current_group_names = tuple(group.get('name') for group in current_groups)
+    if saved_group_names != current_group_names:
+        raise ValueError(
+            'Resume optimizer parameter-group names/order {} do not match '
+            'configured {}.'.format(saved_group_names, current_group_names)
+        )
+    model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+    try:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    except (ValueError, KeyError) as error:
+        raise ValueError(
+            'Resume optimizer state is incompatible with the configured '
+            'model or parameter groups.'
+        ) from error
+    try:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    except (ValueError, KeyError) as error:
+        raise ValueError(
+            'Resume scheduler state is incompatible with the configured scheduler.'
+        ) from error
+    if restore_rng:
+        restore_rng_state(checkpoint['rng_state'])
+    return checkpoint, start_epoch
 
 
 def setup_seed(seed):
@@ -95,7 +442,7 @@ def load_p23_base_weights(
         raise FileNotFoundError(
             'P23 initialization checkpoint not found: {}'.format(checkpoint_path)
         )
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = load_checkpoint_file(checkpoint_path, map_location='cpu')
     saved_memory = checkpoint.get('temporal_memory')
     if saved_memory is not None:
         saved_context_bins = saved_memory.get('context_bins')
@@ -327,6 +674,15 @@ if __name__ == '__main__':
     if int(cfg.epochs) <= 0:
         raise ValueError('TRAIN.epochs must be positive.')
 
+    resume_checkpoint_value = str(
+        getattr(cfg, 'resume_checkpoint', '')
+    ).strip()
+    resume_parent_checkpoint = (
+        Path(resume_checkpoint_value).resolve()
+        if resume_checkpoint_value
+        else None
+    )
+    git_provenance = collect_git_provenance()
     setup_seed(cfg.seed)
     device = torch.device('cuda:0')
     run_dir, started_at = create_run_directory(cfg)
@@ -358,6 +714,16 @@ if __name__ == '__main__':
             cfg,
             'temporal_memory_dense_view_multiplier',
             2,
+        ),
+        density_bucket_boundaries=getattr(
+            cfg,
+            'temporal_memory_density_bucket_boundaries',
+            [],
+        ),
+        density_bucket_views=getattr(
+            cfg,
+            'temporal_memory_density_bucket_views',
+            [],
         ),
     )
     dataloader = torch.utils.data.DataLoader(
@@ -482,14 +848,16 @@ if __name__ == '__main__':
         confidence_head_enabled=confidence_head_enabled,
         temporal_attention_enabled=temporal_attention_enabled,
     ).to(device)
-    initialized_from = load_p23_base_weights(
-        model,
-        cfg.temporal_memory_init_model_path,
-        cfg.temporal_memory_context_bins,
-        cfg.temporal_memory_width,
-        density_calibration_enabled=density_calibration_enabled,
-        confidence_head_enabled=confidence_head_enabled,
-    )
+    initialized_from = None
+    if resume_parent_checkpoint is None:
+        initialized_from = load_p23_base_weights(
+            model,
+            cfg.temporal_memory_init_model_path,
+            cfg.temporal_memory_context_bins,
+            cfg.temporal_memory_width,
+            density_calibration_enabled=density_calibration_enabled,
+            confidence_head_enabled=confidence_head_enabled,
+        )
     if confidence_only_enabled:
         confidence_parameter_ids = {
             id(parameter) for parameter in model.base.confidence_head.parameters()
@@ -498,6 +866,31 @@ if __name__ == '__main__':
             parameter.requires_grad = id(parameter) in confidence_parameter_ids
     optimizer = build_optimizer(model, cfg, confidence_only_enabled)
     scheduler = build_scheduler(optimizer, cfg)
+    start_epoch = 0
+    best_loss = float('inf')
+    best_epoch = None
+    best_loss_checkpoint = None
+    if resume_parent_checkpoint is not None:
+        resumed, start_epoch = load_training_resume(
+            resume_parent_checkpoint,
+            model,
+            optimizer,
+            scheduler,
+            current_config=cfg,
+        )
+        best_loss = float(resumed['best_loss'])
+        best_epoch = resumed['best_epoch']
+        if best_epoch is not None:
+            best_epoch = int(best_epoch)
+        best_loss_checkpoint = resumed.get('best_loss_checkpoint')
+        initialized_from = resumed.get('provenance', {}).get(
+            'initialized_from'
+        )
+        if start_epoch > int(cfg.epochs):
+            raise ValueError(
+                'Resume checkpoint starts at epoch {}, beyond configured '
+                'TRAIN.epochs={}.'.format(start_epoch, cfg.epochs)
+            )
 
     print('random seed:{}'.format(cfg.seed))
     print('run directory:', run_dir)
@@ -505,6 +898,10 @@ if __name__ == '__main__':
     print('temporal-memory model:', memory_config_summary(cfg))
     print('training videos:', len(dataset.file_paths))
     print('training sequences per epoch:', len(dataset))
+    print(
+        'sampling summary:',
+        json.dumps(dataset.sampling_summary(), sort_keys=True),
+    )
     print(
         'dense sequence sampling: enabled={}, cutoff={}, multiplier={}, '
         'dense_videos={}, extra_views={}'.format(
@@ -515,7 +912,12 @@ if __name__ == '__main__':
             dataset.extra_dense_views,
         )
     )
-    if 'temporal_memory' in torch.load(initialized_from, map_location='cpu'):
+    if resume_parent_checkpoint is not None:
+        print('resumed complete training state from:', resume_parent_checkpoint)
+        print('resume start epoch:', start_epoch)
+    elif 'temporal_memory' in load_checkpoint_file(
+        initialized_from, map_location='cpu'
+    ):
         print('initialized full temporal-memory weights from:', initialized_from)
     else:
         print('initialized P23 base weights from:', initialized_from)
@@ -523,9 +925,12 @@ if __name__ == '__main__':
     if confidence_only_enabled:
         print('confidence calibration mode: backbone and memory frozen')
 
-    best_loss = float('inf')
-    best_epoch = None
-    for epoch in range(int(cfg.epochs)):
+    last_checkpoint_path = (
+        resume_parent_checkpoint
+        if start_epoch >= int(cfg.epochs)
+        else run_dir / 'last_seed{}.pt'.format(cfg.seed)
+    )
+    for epoch in range(start_epoch, int(cfg.epochs)):
         dataset.set_epoch(epoch)
         if confidence_only_enabled:
             # Keep the released M5 representation deterministic and train only
@@ -675,39 +1080,35 @@ if __name__ == '__main__':
         scheduler.step()
 
         epoch_loss = loss_sum / max(batch_count, 1)
-        checkpoint = {
-            'model_state_dict': model.state_dict(),
-            'epoch': epoch,
-            'loss': epoch_loss,
-            'temporal_memory': {
-                'temporal_bin_size': int(cfg.temporal_memory_bin_size),
-                'context_bins': int(cfg.temporal_memory_context_bins),
-                'width': int(cfg.temporal_memory_width),
-                'sequence_length': int(cfg.temporal_memory_sequence_length),
-                'log_count_clip': float(cfg.temporal_memory_log_count_clip),
-                'density_calibration_enabled': bool(
-                    getattr(
-                        cfg,
-                        'temporal_frame_density_calibration_enabled',
-                        False,
-                    )
-                ),
-                'trajectory_extrapolation_enabled': trajectory_enabled,
-                'confidence_head_enabled': confidence_head_enabled,
-                'confidence_only_enabled': confidence_only_enabled,
-                'temporal_attention_enabled': temporal_attention_enabled,
-            },
-        }
-        if epoch_loss < best_loss:
+        is_best = epoch_loss < best_loss
+        if is_best:
             best_loss = epoch_loss
             best_epoch = epoch
+            best_loss_checkpoint = (
+                run_dir / 'best_loss_seed{}.pt'.format(cfg.seed)
+            )
+        checkpoint = build_training_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            epoch_loss=epoch_loss,
+            best_loss=best_loss,
+            best_epoch=best_epoch,
+            config=cfg,
+            initialized_from=initialized_from,
+            resume_parent_checkpoint=resume_parent_checkpoint,
+            run_start_epoch=start_epoch,
+            best_loss_checkpoint=best_loss_checkpoint,
+            git_provenance=git_provenance,
+        )
+        if is_best:
             save_checkpoint(
                 checkpoint,
-                run_dir / 'best_loss_seed{}.pt'.format(cfg.seed),
+                best_loss_checkpoint,
             )
-        save_checkpoint(
-            checkpoint, run_dir / 'last_seed{}.pt'.format(cfg.seed)
-        )
+        last_checkpoint_path = run_dir / 'last_seed{}.pt'.format(cfg.seed)
+        save_checkpoint(checkpoint, last_checkpoint_path)
         if checkpoint_interval and (epoch + 1) % checkpoint_interval == 0:
             save_checkpoint(
                 checkpoint,
@@ -731,10 +1132,28 @@ if __name__ == '__main__':
         'seed': int(cfg.seed),
         'best_loss': best_loss,
         'best_epoch': best_epoch,
-        'best_loss_checkpoint': str(
-            run_dir / 'best_loss_seed{}.pt'.format(cfg.seed)
+        'best_loss_checkpoint': (
+            None
+            if best_loss_checkpoint is None
+            else str(best_loss_checkpoint)
         ),
-        'last_checkpoint': str(run_dir / 'last_seed{}.pt'.format(cfg.seed)),
+        'last_checkpoint': (
+            None
+            if last_checkpoint_path is None
+            else str(last_checkpoint_path)
+        ),
+        'start_epoch': start_epoch,
+        'next_epoch': int(cfg.epochs),
+        'initialized_from': (
+            None if initialized_from is None else str(initialized_from)
+        ),
+        'resume_parent_checkpoint': (
+            None
+            if resume_parent_checkpoint is None
+            else str(resume_parent_checkpoint)
+        ),
+        'git': git_provenance,
+        'resolved_config': cfg.resolved_config,
         'config_overrides': list(cfg.config_overrides),
     }
     with (run_dir / 'run_summary.json').open('w', encoding='utf-8') as stream:

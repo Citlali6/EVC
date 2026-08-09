@@ -39,6 +39,9 @@ TRAIN:
   model_save_root: /mnt/d/金种子小目标检测比赛/tmp/EVC/log/model
   # Optional model-only initialization for a later fine-tuning stage.
   init_model_path: ""
+  # Optional complete training-state checkpoint. Unlike init_model_path, this
+  # restores model, optimizer, scheduler, epoch counters, best loss, and RNG.
+  resume_checkpoint: ""
   # P2b uses a faster learning rate only for its newly introduced density gates.
   p2b_gate_lr_multiplier: 1.0
   # P11 uses a faster learning rate for its zero-initialized activity branch.
@@ -260,6 +263,12 @@ TEMPORAL_MEMORY:
   temporal_memory_dense_sampling_enabled: false
   temporal_memory_dense_event_count_cutoff: 200000
   temporal_memory_dense_view_multiplier: 2
+  # Optional absolute views per event-count bucket. For example,
+  # boundaries [30000, 200000] with views [1, 6, 6] creates the inclusive
+  # buckets <=30000, 30001..200000, and >200000. Empty lists preserve the
+  # legacy dense-multiplier behavior above.
+  temporal_memory_density_bucket_boundaries: []
+  temporal_memory_density_bucket_views: []
   # Training-only loss terms aligned with Challenge 2 Pd and false components.
   temporal_memory_metric_aux_enabled: false
   temporal_memory_metric_target_weight: 0.01

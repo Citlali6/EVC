@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 from pathlib import Path
+import zipfile
 
 import numpy as np
 import torch
@@ -30,6 +31,147 @@ def temporal_sequence_start(center_bin, bin_count, sequence_length):
     )
 
 
+def _integer_tuple(values, name):
+    """Normalize a configuration sequence without silently rounding values."""
+    if values is None:
+        return ()
+    if isinstance(values, (str, bytes)):
+        raise ValueError('{} must be a sequence of integers.'.format(name))
+    try:
+        values = tuple(values)
+    except TypeError as error:
+        raise ValueError(
+            '{} must be a sequence of integers.'.format(name)
+        ) from error
+
+    normalized = []
+    for value in values:
+        if isinstance(value, (bool, np.bool_)):
+            raise ValueError('{} must contain only integers.'.format(name))
+        try:
+            normalized_value = int(value)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError(
+                '{} must contain only integers.'.format(name)
+            ) from error
+        if normalized_value != value:
+            raise ValueError('{} must contain only integers.'.format(name))
+        normalized.append(normalized_value)
+    return tuple(normalized)
+
+
+def normalize_density_bucket_config(boundaries=None, views=None):
+    """Validate explicit density buckets and return immutable integer tuples.
+
+    Boundaries are inclusive upper bounds. For example, boundaries
+    ``[30000, 200000]`` produce the buckets ``<=30000``, ``30001..200000``
+    and ``>200000``. Views are absolute per-video sequence counts, not
+    multipliers. Empty boundaries and views disable this sampling mode.
+    """
+    boundaries = _integer_tuple(boundaries, 'density_bucket_boundaries')
+    views = _integer_tuple(views, 'density_bucket_views')
+    enabled = bool(boundaries or views)
+    if not enabled:
+        return (), ()
+    if len(views) != len(boundaries) + 1:
+        raise ValueError(
+            'density_bucket_views must contain exactly one more value than '
+            'density_bucket_boundaries.'
+        )
+    if any(boundary <= 0 for boundary in boundaries):
+        raise ValueError('density bucket boundaries must be positive.')
+    if any(
+        left >= right
+        for left, right in zip(boundaries, boundaries[1:])
+    ):
+        raise ValueError(
+            'density bucket boundaries must be strictly ascending.'
+        )
+    if any(view_count <= 0 for view_count in views):
+        raise ValueError('density bucket views must be positive.')
+    return boundaries, views
+
+
+def temporal_memory_views_by_video(
+    event_counts,
+    views_per_video,
+    dense_sampling_enabled=False,
+    dense_event_count_cutoff=200000,
+    dense_view_multiplier=2,
+    density_bucket_boundaries=None,
+    density_bucket_views=None,
+):
+    """Return per-video view counts and explicit bucket assignments.
+
+    Explicit buckets take precedence when configured. With empty bucket
+    configuration, the legacy dense multiplier (including its strict ``>``
+    cutoff) is preserved.
+    """
+    event_counts = np.asarray(event_counts, dtype=np.int64).reshape(-1)
+    views_per_video = int(views_per_video)
+    if views_per_video <= 0:
+        raise ValueError('views_per_video must be positive.')
+    if np.any(event_counts < 0):
+        raise ValueError('event_counts must not contain negative values.')
+
+    boundaries, bucket_views = normalize_density_bucket_config(
+        density_bucket_boundaries,
+        density_bucket_views,
+    )
+    if bucket_views:
+        bucket_indices = np.searchsorted(
+            np.asarray(boundaries, dtype=np.int64),
+            event_counts,
+            side='left',
+        ).astype(np.int64, copy=False)
+        views_by_video = np.asarray(
+            bucket_views,
+            dtype=np.int64,
+        )[bucket_indices]
+        return views_by_video, bucket_indices
+
+    views_by_video = np.full(
+        event_counts.shape,
+        views_per_video,
+        dtype=np.int64,
+    )
+    bucket_indices = np.full(event_counts.shape, -1, dtype=np.int64)
+    if dense_sampling_enabled:
+        dense_event_count_cutoff = int(dense_event_count_cutoff)
+        dense_view_multiplier = int(dense_view_multiplier)
+        if dense_event_count_cutoff <= 0:
+            raise ValueError('dense_event_count_cutoff must be positive.')
+        if dense_view_multiplier < 2:
+            raise ValueError('dense_view_multiplier must be at least two.')
+        views_by_video[event_counts > dense_event_count_cutoff] *= (
+            dense_view_multiplier
+        )
+    return views_by_video, bucket_indices
+
+
+def npz_event_count(path, array_name='ev_loc'):
+    """Read an event-array row count from its NPY header inside an NPZ file."""
+    path = Path(path)
+    member_name = '{}.npy'.format(array_name)
+    try:
+        with zipfile.ZipFile(path, mode='r') as archive:
+            with archive.open(member_name, mode='r') as stream:
+                version = np.lib.format.read_magic(stream)
+                shape, _, _ = np.lib.format._read_array_header(
+                    stream,
+                    version,
+                )
+    except (KeyError, OSError, ValueError, zipfile.BadZipFile) as error:
+        raise ValueError(
+            '{}: unable to read the {} array header.'.format(path, array_name)
+        ) from error
+    if not shape:
+        raise ValueError(
+            '{}: {} must have at least one dimension.'.format(path, array_name)
+        )
+    return int(shape[0])
+
+
 class TemporalMemoryTrainDataset(Dataset):
     """Sample contiguous full-stream frame sequences without validation data."""
 
@@ -51,6 +193,8 @@ class TemporalMemoryTrainDataset(Dataset):
         dense_sampling_enabled=False,
         dense_event_count_cutoff=200000,
         dense_view_multiplier=2,
+        density_bucket_boundaries=None,
+        density_bucket_views=None,
     ):
         self.root = Path(root)
         self.whole_t = int(whole_t)
@@ -68,6 +212,16 @@ class TemporalMemoryTrainDataset(Dataset):
         self.dense_sampling_enabled = bool(dense_sampling_enabled)
         self.dense_event_count_cutoff = int(dense_event_count_cutoff)
         self.dense_view_multiplier = int(dense_view_multiplier)
+        (
+            self.density_bucket_boundaries,
+            self.density_bucket_views,
+        ) = normalize_density_bucket_config(
+            density_bucket_boundaries,
+            density_bucket_views,
+        )
+        self.density_bucket_sampling_enabled = bool(
+            self.density_bucket_views
+        )
         self.current_epoch = 0
 
         self.file_paths = sorted(self.root.glob('*.npz'))
@@ -100,24 +254,77 @@ class TemporalMemoryTrainDataset(Dataset):
                 )
                 self._videos[video_index] = video
 
-        self.views_by_video = np.full(
-            len(self.file_paths),
+        needs_event_counts = (
+            self.dense_sampling_enabled
+            or self.density_bucket_sampling_enabled
+        )
+        if needs_event_counts:
+            if self.cache_all_videos:
+                self.event_counts_by_video = np.asarray(
+                    [
+                        self._videos[video_index].locations.shape[0]
+                        for video_index in range(len(self.file_paths))
+                    ],
+                    dtype=np.int64,
+                )
+            else:
+                self.event_counts_by_video = np.asarray(
+                    [npz_event_count(path) for path in self.file_paths],
+                    dtype=np.int64,
+                )
+        else:
+            self.event_counts_by_video = np.zeros(
+                len(self.file_paths),
+                dtype=np.int64,
+            )
+
+        self.views_by_video, bucket_indices = temporal_memory_views_by_video(
+            self.event_counts_by_video,
             self.views_per_video,
-            dtype=np.int64,
+            self.dense_sampling_enabled,
+            self.dense_event_count_cutoff,
+            self.dense_view_multiplier,
+            self.density_bucket_boundaries,
+            self.density_bucket_views,
         )
         dense_mask = np.zeros(len(self.file_paths), dtype=bool)
-        if self.dense_sampling_enabled:
-            for video_index in range(len(self.file_paths)):
-                dense_mask[video_index] = (
-                    self._video(video_index).locations.shape[0]
-                    > self.dense_event_count_cutoff
-                )
-            self.views_by_video[dense_mask] *= self.dense_view_multiplier
+        if (
+            self.dense_sampling_enabled
+            and not self.density_bucket_sampling_enabled
+        ):
+            dense_mask = (
+                self.event_counts_by_video > self.dense_event_count_cutoff
+            )
         self.dense_video_count = int(dense_mask.sum())
-        self.extra_dense_views = int(
+        view_delta = int(
             self.views_by_video.sum()
             - len(self.file_paths) * self.views_per_video
         )
+        self.extra_dense_views = (
+            view_delta
+            if self.dense_sampling_enabled
+            and not self.density_bucket_sampling_enabled
+            else 0
+        )
+        self.density_bucket_view_delta = (
+            view_delta if self.density_bucket_sampling_enabled else 0
+        )
+        if self.density_bucket_sampling_enabled:
+            bucket_count = len(self.density_bucket_views)
+            self.density_bucket_video_counts = tuple(
+                int(np.count_nonzero(bucket_indices == bucket_index))
+                for bucket_index in range(bucket_count)
+            )
+            self.density_bucket_sequence_counts = tuple(
+                video_count * view_count
+                for video_count, view_count in zip(
+                    self.density_bucket_video_counts,
+                    self.density_bucket_views,
+                )
+            )
+        else:
+            self.density_bucket_video_counts = ()
+            self.density_bucket_sequence_counts = ()
         self.view_offsets = np.concatenate((
             np.zeros(1, dtype=np.int64),
             np.cumsum(self.views_by_video, dtype=np.int64),
@@ -153,6 +360,36 @@ class TemporalMemoryTrainDataset(Dataset):
 
     def __len__(self):
         return int(self.view_offsets[-1])
+
+    def sampling_summary(self):
+        """Return JSON-friendly sampling diagnostics for experiment logs."""
+        if self.density_bucket_sampling_enabled:
+            mode = 'density_buckets'
+        elif self.dense_sampling_enabled:
+            mode = 'dense_multiplier'
+        else:
+            mode = 'uniform'
+        return {
+            'mode': mode,
+            'video_count': len(self.file_paths),
+            'sequence_count': len(self),
+            'views_per_video': self.views_per_video,
+            'dense_event_count_cutoff': self.dense_event_count_cutoff,
+            'dense_view_multiplier': self.dense_view_multiplier,
+            'dense_video_count': self.dense_video_count,
+            'extra_dense_views': self.extra_dense_views,
+            'density_bucket_boundaries': list(
+                self.density_bucket_boundaries
+            ),
+            'density_bucket_views': list(self.density_bucket_views),
+            'density_bucket_video_counts': list(
+                self.density_bucket_video_counts
+            ),
+            'density_bucket_sequence_counts': list(
+                self.density_bucket_sequence_counts
+            ),
+            'density_bucket_view_delta': self.density_bucket_view_delta,
+        }
 
     def _sample_center_bin(self, video_index, view_index, video):
         seed = (

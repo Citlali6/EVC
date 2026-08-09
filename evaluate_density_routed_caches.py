@@ -13,7 +13,9 @@ validation evaluator, never by routing.
 
 import argparse
 import json
+import math
 import os
+import subprocess
 import sys
 import tempfile
 from dataclasses import asdict
@@ -24,6 +26,41 @@ import numpy as np
 import torch
 
 import replay_temporal_memory_validation as replay
+
+
+PROVENANCE_FILES = (
+    "evaluate_density_routed_caches.py",
+    "replay_temporal_memory_validation.py",
+    "utils/challenge_eval.py",
+    "utils/density_threshold.py",
+    "utils/eval.py",
+    "utils/postprocess.py",
+)
+
+
+def _code_provenance():
+    root = Path(__file__).resolve().parent
+    return {name: replay.sha256_file(root / name) for name in PROVENANCE_FILES}
+
+
+def _git_provenance():
+    root = Path(__file__).resolve().parent
+
+    def run(*arguments):
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=str(root),
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    return {
+        "commit": run("rev-parse", "HEAD"),
+        "branch": run("rev-parse", "--abbrev-ref", "HEAD"),
+        "status_porcelain": run("status", "--porcelain").splitlines(),
+    }
 
 
 def _aligned_record(cache, index, reference, cache_name):
@@ -143,11 +180,23 @@ def _atomic_write_json(path, payload, force=False):
     )
     try:
         with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            json.dump(
+                payload,
+                stream,
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            )
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp_name, path)
+        if force:
+            os.replace(temp_name, path)
+        else:
+            # A same-directory hard link publishes the fully fsynced inode and
+            # fails atomically if another process created the output meanwhile.
+            os.link(temp_name, path)
+            os.unlink(temp_name)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
@@ -180,12 +229,43 @@ def main(argv=None):
     output_path = args.output_json.resolve()
     if any(output_path == path for path in paths.values()):
         raise ValueError("Output JSON must not overwrite an input cache.")
+    thresholds = {
+        "low": args.low_threshold,
+        "middle": args.middle_threshold,
+        "high": args.high_threshold,
+    }
+    invalid_thresholds = {
+        name: value
+        for name, value in thresholds.items()
+        if not math.isfinite(float(value)) or not 0.0 < float(value) < 1.0
+    }
+    if invalid_thresholds:
+        raise ValueError(
+            "Thresholds must be finite and strictly between zero and one: {}.".format(
+                invalid_thresholds
+            )
+        )
 
+    code_before = _code_provenance()
+    git_before = _git_provenance()
+    config_digest = replay.sha256_file(args.config.resolve())
     cfg = replay.load_flat_config(args.config, args.override)
     snapshots = {}
     cache_hashes = {}
     for name, path in paths.items():
         snapshots[name], cache_hashes[name] = replay.load_cache_snapshot(path)
+    cached_inference = snapshots["middle"]["metadata"]["inference_settings"]
+    current_inference = replay._inference_settings(cfg)
+    inference_differences = replay._mapping_differences(
+        cached_inference,
+        current_inference,
+    )
+    if inference_differences:
+        raise ValueError(
+            "Current config and raw-cache inference settings differ: {}.".format(
+                ", ".join(inference_differences)
+            )
+        )
     records = route_three_caches(
         snapshots["low"],
         snapshots["middle"],
@@ -193,12 +273,11 @@ def main(argv=None):
         args.low_max_events,
         args.high_min_events,
     )
-    thresholds = {
-        "low": args.low_threshold,
-        "middle": args.middle_threshold,
-        "high": args.high_threshold,
-    }
     result = evaluate_route(records, cfg, thresholds)
+    if _code_provenance() != code_before:
+        raise RuntimeError("Evaluation code changed while routing caches.")
+    if replay.sha256_file(args.config.resolve()) != config_digest:
+        raise RuntimeError("Configuration file changed while routing caches.")
     result.update(
         {
             "schema": "ev-uav-three-density-route-v1",
@@ -223,7 +302,12 @@ def main(argv=None):
                 "dataset_signature"
             ],
             "config_path": str(args.config.resolve()),
+            "config_sha256": config_digest,
+            "resolved_config": cfg.resolved_config,
             "config_overrides": list(args.override),
+            "inference_settings": current_inference,
+            "code_sha256": code_before,
+            "git": git_before,
             "command": list(sys.argv),
         }
     )

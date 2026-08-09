@@ -50,6 +50,18 @@ ALLOWED_RESUME_CONFIG_DIFFERENCES = frozenset(
 )
 LEGACY_RESUME_CONFIG_DEFAULTS = {
     (
+        'POSTPROCESS',
+        'p0c_density_retain_enabled',
+    ): False,
+    (
+        'POSTPROCESS',
+        'p0c_density_event_count_cutoff',
+    ): 100000,
+    (
+        'POSTPROCESS',
+        'p0c_density_retain_min_score',
+    ): 0.97,
+    (
         'TEMPORAL_MEMORY',
         'temporal_memory_freeze_base_enabled',
     ): False,

@@ -36,6 +36,9 @@ def make_cfg():
         p0_min_duration_bins=2,
         p0c_high_confidence_recovery_enabled=True,
         p0c_retain_min_score=0.95,
+        p0c_density_retain_enabled=False,
+        p0c_density_event_count_cutoff=100000,
+        p0c_density_retain_min_score=0.97,
         p0b_enabled=False,
         p18_score_track_recovery_enabled=True,
         p18_event_count_cutoff=1,
@@ -141,7 +144,11 @@ def direct_test2_metrics(records, density_cutoff, low_threshold, high_threshold,
             low_threshold,
             high_threshold,
         )
-        postprocessor = ChallengePostprocessor.from_cfg(cfg, threshold)
+        postprocessor = ChallengePostprocessor.from_cfg(
+            cfg,
+            threshold,
+            event_count=record.event_count,
+        )
         predictions, _ = postprocessor.apply(record.scores.clone(), record.locs)
         # This is the P6 branch in test2.py: persist each video's selected
         # decision as binary before the global semantic evaluation.

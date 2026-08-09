@@ -664,7 +664,11 @@ def evaluate_cached_video(record: RoutedRecord, threshold: float, cfg) -> Challe
     """Return exact per-video sufficient counts after real project postprocessing."""
 
     threshold = float(threshold)
-    postprocessor = ChallengePostprocessor.from_cfg(cfg, threshold)
+    postprocessor = ChallengePostprocessor.from_cfg(
+        cfg,
+        threshold,
+        event_count=record.event_count,
+    )
     predictions, _ = postprocessor.apply(record.scores.clone(), record.locs)
     evaluator = evalute(cfg)
     batch = {
@@ -886,6 +890,9 @@ def _postprocess_settings(cfg) -> dict:
         "p0_min_duration_bins",
         "p0c_high_confidence_recovery_enabled",
         "p0c_retain_min_score",
+        "p0c_density_retain_enabled",
+        "p0c_density_event_count_cutoff",
+        "p0c_density_retain_min_score",
         "p0b_enabled",
         "p0b_spatial_radius",
         "p0b_temporal_bin_size",

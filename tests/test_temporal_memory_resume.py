@@ -314,6 +314,36 @@ class TemporalMemoryResumeTests(unittest.TestCase):
         ):
             validate_resume_config(checkpoint, freeze_enabled)
 
+    def test_legacy_resume_accepts_only_default_density_p0c_options(self):
+        defaults = {
+            'p0c_density_retain_enabled': False,
+            'p0c_density_event_count_cutoff': 100000,
+            'p0c_density_retain_min_score': 0.97,
+        }
+        saved_config = make_config()
+        saved_config.resolved_config['POSTPROCESS'] = {}
+        checkpoint = {
+            'provenance': {
+                'resolved_config': copy.deepcopy(saved_config.resolved_config)
+            }
+        }
+        current = make_config()
+        current.resolved_config['POSTPROCESS'] = copy.deepcopy(defaults)
+        validate_resume_config(checkpoint, current)
+
+        changed_values = {
+            'p0c_density_retain_enabled': True,
+            'p0c_density_event_count_cutoff': 99999,
+            'p0c_density_retain_min_score': 0.96,
+        }
+        for key, value in changed_values.items():
+            with self.subTest(key=key):
+                changed = make_config()
+                changed.resolved_config['POSTPROCESS'] = copy.deepcopy(defaults)
+                changed.resolved_config['POSTPROCESS'][key] = value
+                with self.assertRaisesRegex(ValueError, key):
+                    validate_resume_config(checkpoint, changed)
+
     def test_optimizer_group_name_or_order_change_is_rejected(self):
         model = torch.nn.Linear(2, 1)
         optimizer = torch.optim.AdamW(

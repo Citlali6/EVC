@@ -7,6 +7,7 @@ Neither module changes scores during training and both are disabled by default.
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -34,6 +35,10 @@ class P0ClusterFilterConfig:
     min_duration_bins: int = 1
     high_confidence_recovery_enabled: bool = False
     retain_min_score: float = 0.98
+    density_retain_enabled: bool = False
+    density_event_count_cutoff: int = 100000
+    density_retain_min_score: float = 0.97
+    event_count: Optional[int] = None
 
     def __post_init__(self):
         if self.spatial_radius < 0:
@@ -48,9 +53,38 @@ class P0ClusterFilterConfig:
             raise ValueError('p0_min_duration_bins must be >= 1.')
         if not 0.0 <= self.retain_min_score <= 1.0:
             raise ValueError('p0c_retain_min_score must be in [0, 1].')
+        if self.density_event_count_cutoff < 0:
+            raise ValueError('p0c_density_event_count_cutoff must be non-negative.')
+        if not 0.0 <= self.density_retain_min_score <= 1.0:
+            raise ValueError('p0c_density_retain_min_score must be in [0, 1].')
+        if self.event_count is not None and self.event_count < 0:
+            raise ValueError('event_count must be non-negative.')
+        if self.density_retain_enabled and self.event_count is None:
+            raise ValueError(
+                'p0c_density_retain_enabled requires a complete-video event_count.'
+            )
 
     @classmethod
-    def from_cfg(cls, cfg):
+    def from_cfg(cls, cfg, event_count=None):
+        density_retain_enabled = _as_bool(
+            getattr(cfg, 'p0c_density_retain_enabled', False)
+        )
+        density_event_count_cutoff = int(
+            getattr(cfg, 'p0c_density_event_count_cutoff', 100000)
+        )
+        density_retain_min_score = float(
+            getattr(cfg, 'p0c_density_retain_min_score', 0.97)
+        )
+        normalized_event_count = (
+            None if event_count is None else int(event_count)
+        )
+        retain_min_score = float(getattr(cfg, 'p0c_retain_min_score', 0.98))
+        if (
+            density_retain_enabled
+            and normalized_event_count is not None
+            and normalized_event_count > density_event_count_cutoff
+        ):
+            retain_min_score = density_retain_min_score
         return cls(
             enabled=_as_bool(getattr(cfg, 'p0_enabled', False)),
             spatial_radius=int(getattr(cfg, 'p0_spatial_radius', 1)),
@@ -63,7 +97,11 @@ class P0ClusterFilterConfig:
             high_confidence_recovery_enabled=_as_bool(
                 getattr(cfg, 'p0c_high_confidence_recovery_enabled', False)
             ),
-            retain_min_score=float(getattr(cfg, 'p0c_retain_min_score', 0.98)),
+            retain_min_score=retain_min_score,
+            density_retain_enabled=density_retain_enabled,
+            density_event_count_cutoff=density_event_count_cutoff,
+            density_retain_min_score=density_retain_min_score,
+            event_count=normalized_event_count,
         )
 
 
@@ -505,8 +543,11 @@ class P0ClusterFilter:
         self.prediction_threshold = float(prediction_threshold)
 
     @classmethod
-    def from_cfg(cls, cfg, prediction_threshold=0.9):
-        return cls(P0ClusterFilterConfig.from_cfg(cfg), prediction_threshold)
+    def from_cfg(cls, cfg, prediction_threshold=0.9, event_count=None):
+        return cls(
+            P0ClusterFilterConfig.from_cfg(cfg, event_count=event_count),
+            prediction_threshold,
+        )
 
     @property
     def enabled(self):
@@ -533,6 +574,13 @@ class P0ClusterFilter:
             description += ', P0c high-confidence recovery (retain_min_score={})'.format(
                 self.config.retain_min_score
             )
+            if self.config.density_retain_enabled:
+                description += (
+                    ', density retain (event_count > {}: retain_min_score={})'
+                ).format(
+                    self.config.density_event_count_cutoff,
+                    self.config.density_retain_min_score,
+                )
         return description
 
     def apply(self, predictions, locations):
@@ -1123,8 +1171,12 @@ class ChallengePostprocessor:
         self._score_track_recovery = score_track_recovery
 
     @classmethod
-    def from_cfg(cls, cfg, prediction_threshold=0.9):
-        p0_filter = P0ClusterFilter.from_cfg(cfg, prediction_threshold)
+    def from_cfg(cls, cfg, prediction_threshold=0.9, event_count=None):
+        p0_filter = P0ClusterFilter.from_cfg(
+            cfg,
+            prediction_threshold,
+            event_count=event_count,
+        )
         p0b_filter = P0bTrackFilter.from_cfg(cfg, prediction_threshold)
         score_track_recovery = P18ScoreTrackRecovery.from_cfg(
             cfg,
@@ -1136,6 +1188,14 @@ class ChallengePostprocessor:
         ):
             raise ValueError(
                 'P0c high-confidence recovery requires POSTPROCESS.p0_enabled=true.'
+            )
+        if (
+            p0_filter.config.density_retain_enabled
+            and not p0_filter.config.high_confidence_recovery_enabled
+        ):
+            raise ValueError(
+                'P0c density retain requires '
+                'POSTPROCESS.p0c_high_confidence_recovery_enabled=true.'
             )
         if p0_filter.enabled and p0b_filter.enabled:
             raise ValueError(
@@ -1153,6 +1213,13 @@ class ChallengePostprocessor:
     @property
     def enabled(self):
         return self._postprocessor.enabled or self._score_track_recovery.enabled
+
+    @property
+    def density_retain_enabled(self):
+        return bool(
+            isinstance(self._postprocessor, P0ClusterFilter)
+            and self._postprocessor.config.density_retain_enabled
+        )
 
     def new_stats(self):
         return ChallengePostprocessStats(

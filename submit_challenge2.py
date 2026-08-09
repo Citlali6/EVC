@@ -85,6 +85,13 @@ if __name__ == "__main__":
         raise ValueError(
             'TEMPORAL_FRAME and TEMPORAL_MEMORY cannot be enabled together.'
         )
+    postprocessor = ChallengePostprocessor.from_cfg(
+        cfg,
+        PREDICTION_THRESHOLD,
+        event_count=0,
+    )
+    if postprocessor.density_retain_enabled and cfg.batch_size != 1:
+        raise ValueError('P0c density retain requires batch_size=1.')
     fine_detail_bin_ratio = 1
     if temporal_frame_config.fine_detail_enabled:
         if (
@@ -206,7 +213,6 @@ if __name__ == "__main__":
     print("temporal-frame expert:", temporal_frame_config.describe())
     print("temporal-memory expert:", temporal_memory_config.describe())
     print("prediction output:", OUTPUT_DIR)
-    postprocessor = ChallengePostprocessor.from_cfg(cfg, PREDICTION_THRESHOLD)
     postprocess_stats = postprocessor.new_stats()
     threshold_usage = {}
     print("postprocessor:", postprocessor.describe())
@@ -447,9 +453,10 @@ if __name__ == "__main__":
                 event_count,
                 PREDICTION_THRESHOLD,
             )
-            batch_postprocessor = (
-                ChallengePostprocessor.from_cfg(cfg, batch_threshold)
-                if threshold_policy.enabled else postprocessor
+            batch_postprocessor = ChallengePostprocessor.from_cfg(
+                cfg,
+                batch_threshold,
+                event_count=event_count,
             )
             predictions, batch_postprocess_stats = batch_postprocessor.apply(
                 predictions,
@@ -475,13 +482,15 @@ if __name__ == "__main__":
                     event_frame=batch.get("event_frame"),
                     source_event_count=batch["locs"].shape[0],
                 )
+                event_count = int(batch["locs"].shape[0])
                 batch_threshold = threshold_policy.threshold_for_event_count(
-                    predictions.numel(),
+                    event_count,
                     PREDICTION_THRESHOLD,
                 )
-                batch_postprocessor = (
-                    ChallengePostprocessor.from_cfg(cfg, batch_threshold)
-                    if threshold_policy.enabled else postprocessor
+                batch_postprocessor = ChallengePostprocessor.from_cfg(
+                    cfg,
+                    batch_threshold,
+                    event_count=event_count,
                 )
                 predictions, batch_postprocess_stats = batch_postprocessor.apply(
                     predictions,

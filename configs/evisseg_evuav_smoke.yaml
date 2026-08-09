@@ -124,6 +124,9 @@ POSTPROCESS:
   # P0c: retain only very high-confidence clusters that P0 would remove.
   p0c_high_confidence_recovery_enabled: false
   p0c_retain_min_score: 0.98
+  p0c_density_retain_enabled: false
+  p0c_density_event_count_cutoff: 100000
+  p0c_density_retain_min_score: 0.97
   # P0b: centroid-track alternative to P0; P0 and P0b are mutually exclusive.
   p0b_enabled: false
   p0b_spatial_radius: 1

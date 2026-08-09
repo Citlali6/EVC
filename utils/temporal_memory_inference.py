@@ -31,6 +31,8 @@ class TemporalMemoryInferenceConfig:
     secondary_model_path: str = ''
     primary_weight: float = 1.0
     secondary_max_event_count: int = 0
+    blend_model_path: str = ''
+    blend_primary_weight: float = 1.0
 
     def __post_init__(self):
         if self.enabled and not self.model_path:
@@ -41,6 +43,11 @@ class TemporalMemoryInferenceConfig:
         if not 0.0 <= self.primary_weight <= 1.0:
             raise ValueError(
                 'TEMPORAL_MEMORY.temporal_memory_primary_weight must be in [0, 1].'
+            )
+        if not 0.0 <= self.blend_primary_weight <= 1.0:
+            raise ValueError(
+                'TEMPORAL_MEMORY.temporal_memory_blend_primary_weight '
+                'must be in [0, 1].'
             )
         if self.secondary_max_event_count < 0:
             raise ValueError(
@@ -55,6 +62,10 @@ class TemporalMemoryInferenceConfig:
     @property
     def has_secondary_model(self):
         return bool(self.secondary_model_path.strip())
+
+    @property
+    def has_blend_model(self):
+        return bool(self.blend_model_path.strip())
 
     @property
     def routes_secondary_by_event_count(self):
@@ -81,6 +92,12 @@ class TemporalMemoryInferenceConfig:
             secondary_max_event_count=int(
                 getattr(cfg, 'temporal_memory_secondary_max_event_count', 0)
             ),
+            blend_model_path=str(
+                getattr(cfg, 'temporal_memory_blend_model_path', '')
+            ),
+            blend_primary_weight=float(
+                getattr(cfg, 'temporal_memory_blend_primary_weight', 1.0)
+            ),
         )
 
     def describe(self):
@@ -99,6 +116,13 @@ class TemporalMemoryInferenceConfig:
                 )
             else:
                 description += ', primary_weight={:.3f}'.format(self.primary_weight)
+        if self.has_blend_model:
+            description += ', high-density blend_model={}'.format(
+                self.blend_model_path
+            )
+            description += ', blend_primary_weight={:.3f}'.format(
+                self.blend_primary_weight
+            )
         return description + ')'
 
 

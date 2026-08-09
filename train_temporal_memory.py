@@ -153,28 +153,41 @@ def load_p23_base_weights(
         configured_temporal_attention = bool(
             getattr(cfg, 'temporal_memory_temporal_attention_enabled', False)
         )
-        if saved_temporal_attention != configured_temporal_attention:
+        adding_temporal_attention = (
+            configured_temporal_attention and not saved_temporal_attention
+        )
+        if saved_temporal_attention and not configured_temporal_attention:
             raise ValueError(
                 'M5 temporal attention={} does not match configured {}.'.format(
                     saved_temporal_attention, configured_temporal_attention
                 )
             )
+        # The attention branch is zero-initialized at construction time, so it
+        # can be attached safely to an existing ConvGRU checkpoint. Its
+        # parameters are intentionally the only new missing keys allowed here.
         load_result = model.load_state_dict(
             checkpoint['model_state_dict'],
-            strict=not adding_confidence_head,
+            strict=not (adding_confidence_head or adding_temporal_attention),
         )
-        if adding_confidence_head:
-            expected_missing = {
-                'base.confidence_head.' + name
-                for name in model.base.confidence_head.state_dict()
-            }
+        if adding_confidence_head or adding_temporal_attention:
+            expected_missing = set()
+            if adding_confidence_head:
+                expected_missing.update(
+                    'base.confidence_head.' + name
+                    for name in model.base.confidence_head.state_dict()
+                )
+            if adding_temporal_attention:
+                expected_missing.update(
+                    'temporal_attn.' + name
+                    for name in model.temporal_attn.state_dict()
+                )
             if (
                 set(load_result.missing_keys) != expected_missing
                 or load_result.unexpected_keys
             ):
                 raise RuntimeError(
-                    'Only the newly attached confidence head may be missing '
-                    'when initializing from a complete M5 checkpoint. '
+                    'Only newly attached branches may be missing when '
+                    'initializing from a complete temporal-memory checkpoint. '
                     'Missing={}, unexpected={}.'.format(
                         load_result.missing_keys,
                         load_result.unexpected_keys,
@@ -245,6 +258,8 @@ def build_optimizer(model, config, confidence_only_enabled=False):
     memory_parameters = list(model.forward_memory.parameters())
     memory_parameters += list(model.backward_memory.parameters())
     memory_parameters += list(model.memory_projection.parameters())
+    if getattr(model, 'temporal_attention_enabled', False):
+        memory_parameters += list(model.temporal_attn.parameters())
     parameter_groups = [
         {
             'name': 'base',

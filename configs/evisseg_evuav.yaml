@@ -281,6 +281,10 @@ TEMPORAL_MEMORY:
   temporal_memory_primary_weight: 1.0
   # When positive, use the secondary model directly up to this event count.
   temporal_memory_secondary_max_event_count: 0
+  # Optional third checkpoint blended with the primary on videos outside the
+  # secondary low-density route. This supports M15/M16 high-density fusion.
+  temporal_memory_blend_model_path: ""
+  temporal_memory_blend_primary_weight: 1.0
   temporal_memory_init_model_path: ""
   temporal_memory_sparse_weight: 0.50
   temporal_memory_base_lr_multiplier: 1.0  # 本仓库改为 1.0（关键）：0.1 会饿死 base

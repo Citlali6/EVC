@@ -128,6 +128,7 @@ if __name__ == "__main__":
         )
     temporal_memory_model = None
     temporal_memory_secondary_model = None
+    temporal_memory_blend_model = None
     if temporal_memory_config.enabled:
         if int(cfg.temporal_memory_context_bins) % 2 == 0:
             raise ValueError('TEMPORAL_MEMORY.context_bins must be odd.')
@@ -145,6 +146,14 @@ if __name__ == "__main__":
         if temporal_memory_config.has_secondary_model:
             temporal_memory_secondary_model, _ = load_temporal_memory_model(
                 temporal_memory_config.secondary_model_path,
+                device,
+                cfg.temporal_memory_context_bins,
+                cfg.temporal_memory_width,
+                cfg.temporal_memory_sequence_length,
+            )
+        if temporal_memory_config.has_blend_model:
+            temporal_memory_blend_model, _ = load_temporal_memory_model(
+                temporal_memory_config.blend_model_path,
                 device,
                 cfg.temporal_memory_context_bins,
                 cfg.temporal_memory_width,
@@ -266,10 +275,11 @@ if __name__ == "__main__":
                     cfg.temporal_memory_inference_batch_size,
                     cfg.temporal_memory_log_count_clip,
                 )
+                use_secondary = temporal_memory_config.use_secondary_for_event_count(
+                    event_count
+                )
                 if temporal_memory_secondary_model is not None:
-                    if temporal_memory_config.use_secondary_for_event_count(
-                        event_count
-                    ):
+                    if use_secondary:
                         predictions = predict_temporal_memory_scores(
                             temporal_memory_secondary_model,
                             frame_video,
@@ -296,6 +306,22 @@ if __name__ == "__main__":
                             secondary_scores,
                             temporal_memory_config.primary_weight,
                         )
+                if temporal_memory_blend_model is not None and not use_secondary:
+                    blend_scores = predict_temporal_memory_scores(
+                        temporal_memory_blend_model,
+                        frame_video,
+                        device,
+                        cfg.temporal_memory_context_bins,
+                        cfg.res[0],
+                        cfg.res[1],
+                        cfg.temporal_memory_inference_batch_size,
+                        cfg.temporal_memory_log_count_clip,
+                    )
+                    predictions = blend_temporal_memory_scores(
+                        predictions,
+                        blend_scores,
+                        temporal_memory_config.blend_primary_weight,
+                    )
                 chunk_count = 0
             elif temporal_frame_only:
                 predictions = predict_temporal_frame_scores(

@@ -257,6 +257,11 @@ TEMPORAL_MEMORY:
   temporal_memory_train_views_per_video: 2
   temporal_memory_train_min_event_count_exclusive: null
   temporal_memory_positive_frame_probability: 0.75
+  # Train-label-only sampling for sparse target-time groups. Disabled by
+  # default so released runs preserve their exact center-bin RNG sequence.
+  temporal_memory_sparse_target_support_sampling_enabled: false
+  temporal_memory_sparse_target_support_max_events: 3
+  temporal_memory_sparse_target_support_probability: 0.75
   temporal_memory_target_positive_loss_mass: 0.20
   temporal_memory_max_positive_weight: 16.0
   # Training-only density reweighting. Dense videos retain their base views

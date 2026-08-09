@@ -77,6 +77,18 @@ LEGACY_RESUME_CONFIG_DEFAULTS = {
         'TEMPORAL_MEMORY',
         'temporal_memory_attention_projection_only_enabled',
     ): False,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_sparse_target_support_sampling_enabled',
+    ): False,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_sparse_target_support_max_events',
+    ): 3,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_sparse_target_support_probability',
+    ): 0.75,
 }
 HEAD_ONLY_MUTABLE_STATE_KEYS = frozenset(
     {
@@ -1660,6 +1672,72 @@ def apply_target_coverage_loss(
     return base_loss, 0.0
 
 
+def build_temporal_memory_train_dataset(config):
+    """Build the training dataset from the fully resolved configuration."""
+    return TemporalMemoryTrainDataset(
+        root=Path(config.root) / 'train',
+        whole_t=config.whole_t,
+        temporal_bin_size=config.temporal_memory_bin_size,
+        context_bins=config.temporal_memory_context_bins,
+        sequence_length=config.temporal_memory_sequence_length,
+        width=config.res[0],
+        height=config.res[1],
+        views_per_video=config.temporal_memory_train_views_per_video,
+        positive_frame_probability=(
+            config.temporal_memory_positive_frame_probability
+        ),
+        random_seed=config.seed,
+        log_count_clip=config.temporal_memory_log_count_clip,
+        cache_all_videos=config.temporal_memory_cache_all_videos,
+        cache_video_count=config.temporal_memory_cache_video_count,
+        dense_sampling_enabled=getattr(
+            config,
+            'temporal_memory_dense_sampling_enabled',
+            False,
+        ),
+        dense_event_count_cutoff=getattr(
+            config,
+            'temporal_memory_dense_event_count_cutoff',
+            200000,
+        ),
+        dense_view_multiplier=getattr(
+            config,
+            'temporal_memory_dense_view_multiplier',
+            2,
+        ),
+        density_bucket_boundaries=getattr(
+            config,
+            'temporal_memory_density_bucket_boundaries',
+            [],
+        ),
+        density_bucket_views=getattr(
+            config,
+            'temporal_memory_density_bucket_views',
+            [],
+        ),
+        min_event_count_exclusive=getattr(
+            config,
+            'temporal_memory_train_min_event_count_exclusive',
+            None,
+        ),
+        sparse_target_support_sampling_enabled=getattr(
+            config,
+            'temporal_memory_sparse_target_support_sampling_enabled',
+            False,
+        ),
+        sparse_target_support_max_events=getattr(
+            config,
+            'temporal_memory_sparse_target_support_max_events',
+            3,
+        ),
+        sparse_target_support_probability=getattr(
+            config,
+            'temporal_memory_sparse_target_support_probability',
+            0.75,
+        ),
+    )
+
+
 if __name__ == '__main__':
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA is required for temporal-memory training.')
@@ -1733,51 +1811,7 @@ if __name__ == '__main__':
     setup_seed(cfg.seed)
     device = torch.device('cuda:0')
     run_dir, started_at = create_run_directory(cfg)
-    dataset = TemporalMemoryTrainDataset(
-        root=Path(cfg.root) / 'train',
-        whole_t=cfg.whole_t,
-        temporal_bin_size=cfg.temporal_memory_bin_size,
-        context_bins=cfg.temporal_memory_context_bins,
-        sequence_length=cfg.temporal_memory_sequence_length,
-        width=cfg.res[0],
-        height=cfg.res[1],
-        views_per_video=cfg.temporal_memory_train_views_per_video,
-        positive_frame_probability=cfg.temporal_memory_positive_frame_probability,
-        random_seed=cfg.seed,
-        log_count_clip=cfg.temporal_memory_log_count_clip,
-        cache_all_videos=cfg.temporal_memory_cache_all_videos,
-        cache_video_count=cfg.temporal_memory_cache_video_count,
-        dense_sampling_enabled=getattr(
-            cfg,
-            'temporal_memory_dense_sampling_enabled',
-            False,
-        ),
-        dense_event_count_cutoff=getattr(
-            cfg,
-            'temporal_memory_dense_event_count_cutoff',
-            200000,
-        ),
-        dense_view_multiplier=getattr(
-            cfg,
-            'temporal_memory_dense_view_multiplier',
-            2,
-        ),
-        density_bucket_boundaries=getattr(
-            cfg,
-            'temporal_memory_density_bucket_boundaries',
-            [],
-        ),
-        density_bucket_views=getattr(
-            cfg,
-            'temporal_memory_density_bucket_views',
-            [],
-        ),
-        min_event_count_exclusive=getattr(
-            cfg,
-            'temporal_memory_train_min_event_count_exclusive',
-            None,
-        ),
-    )
+    dataset = build_temporal_memory_train_dataset(cfg)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
@@ -2046,6 +2080,16 @@ if __name__ == '__main__':
     print(
         'sampling summary:',
         json.dumps(dataset.sampling_summary(), sort_keys=True),
+    )
+    print(
+        'sparse-target-support sampling: enabled={}, max_events={}, '
+        'probability={}, eligible_videos={}, eligible_bins={}'.format(
+            dataset.sparse_target_support_sampling_enabled,
+            dataset.sparse_target_support_max_events,
+            dataset.sparse_target_support_probability,
+            dataset.sparse_target_support_video_count,
+            dataset.sparse_target_support_bin_count,
+        )
     )
     print(
         'dense sequence sampling: enabled={}, cutoff={}, multiplier={}, '

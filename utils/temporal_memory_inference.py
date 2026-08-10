@@ -14,6 +14,11 @@ from model.temporal_frame_net import (
 from model.temporal_memory_net import BidirectionalTemporalMemoryNet
 
 
+_SEQUENCE_LENGTH_WARM_START_MIGRATION = (
+    'temporal_memory_sequence_length_t16_to_t32_strict_state'
+)
+
+
 def _as_bool(value):
     if isinstance(value, str):
         value = value.strip().lower()
@@ -148,6 +153,84 @@ def load_temporal_memory_model(
     saved_context_bins = saved.get('context_bins')
     saved_width = saved.get('width')
     saved_sequence_length = saved.get('sequence_length')
+    warm_start_marker = bool(
+        saved.get('init_sequence_length_warm_start_enabled', False)
+    )
+    provenance = checkpoint.get('provenance', {})
+    migrations = (
+        provenance.get('initialization_migrations', [])
+        if isinstance(provenance, dict)
+        else []
+    )
+    warm_start_migrations = (
+        [
+            migration
+            for migration in migrations
+            if isinstance(migration, dict)
+            and migration.get('name')
+            == _SEQUENCE_LENGTH_WARM_START_MIGRATION
+        ]
+        if isinstance(migrations, list)
+        else []
+    )
+    resolved_config = (
+        provenance.get('resolved_config', {})
+        if isinstance(provenance, dict)
+        else {}
+    )
+    resolved_temporal_memory = (
+        resolved_config.get('TEMPORAL_MEMORY', {})
+        if isinstance(resolved_config, dict)
+        else {}
+    )
+    warm_start_resolved_config = bool(
+        resolved_temporal_memory.get(
+            'temporal_memory_init_sequence_length_warm_start_enabled',
+            False,
+        )
+    ) if isinstance(resolved_temporal_memory, dict) else False
+    warm_start_claimed = bool(
+        warm_start_marker
+        or warm_start_migrations
+        or warm_start_resolved_config
+    )
+    if warm_start_claimed:
+        if checkpoint.get('checkpoint_format_version') != 2:
+            raise ValueError('Warm-start checkpoint must use format version 2.')
+        if not warm_start_marker:
+            raise ValueError('Warm-start checkpoint metadata marker is missing.')
+        if not warm_start_resolved_config:
+            raise ValueError(
+                'Warm-start checkpoint resolved configuration is missing.'
+            )
+        if (
+            not isinstance(migrations, list)
+            or len(migrations) != 1
+            or len(warm_start_migrations) != 1
+        ):
+            raise ValueError(
+                'Warm-start checkpoint must contain the sole T16 -> T32 '
+                'initialization migration.'
+            )
+        migration = warm_start_migrations[0]
+        if (
+            migration.get('source_sequence_length') != 16
+            or migration.get('target_sequence_length') != 32
+            or migration.get('metadata_difference_allowlist')
+            != ['sequence_length']
+            or migration.get('state_dict_strict') is not True
+        ):
+            raise ValueError('Warm-start checkpoint migration provenance is invalid.')
+        if saved_sequence_length is None:
+            raise ValueError(
+                'Warm-start temporal-memory checkpoint is missing required '
+                'sequence_length metadata.'
+            )
+        if int(saved_sequence_length) != 32 or int(sequence_length) != 32:
+            raise ValueError(
+                'Warm-start checkpoint and configured sequence_length must both '
+                'be 32.'
+            )
     saved_density_calibration = bool(
         saved.get('density_calibration_enabled', False)
     )

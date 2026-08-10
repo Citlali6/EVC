@@ -41,6 +41,11 @@ from utils.temporal_frame_loss import (
 
 
 RESUME_CHECKPOINT_FORMAT_VERSION = 2
+SEQUENCE_LENGTH_WARM_START_SOURCE = 16
+SEQUENCE_LENGTH_WARM_START_TARGET = 32
+SEQUENCE_LENGTH_WARM_START_MIGRATION = (
+    'temporal_memory_sequence_length_t16_to_t32_strict_state'
+)
 ALLOWED_RESUME_CONFIG_DIFFERENCES = frozenset(
     {
         ('TRAIN', 'resume_checkpoint'),
@@ -89,6 +94,10 @@ LEGACY_RESUME_CONFIG_DEFAULTS = {
         'TEMPORAL_MEMORY',
         'temporal_memory_train_min_event_count_exclusive',
     ): None,
+    (
+        'TEMPORAL_MEMORY',
+        'temporal_memory_init_sequence_length_warm_start_enabled',
+    ): False,
     (
         'TEMPORAL_MEMORY',
         'temporal_memory_dacc_v2_enabled',
@@ -584,6 +593,94 @@ def validate_resume_config(checkpoint, current_config):
         )
 
 
+def validate_sequence_length_warm_start_provenance(
+    config,
+    initialized_from,
+    initialized_from_sha256,
+    initialization_migrations,
+):
+    """Audit the sole init-only T16 -> T32 metadata exception."""
+    enabled = bool(
+        getattr(
+            config,
+            'temporal_memory_init_sequence_length_warm_start_enabled',
+            False,
+        )
+    )
+    migrations = [
+        migration
+        for migration in initialization_migrations
+        if isinstance(migration, dict)
+        and migration.get('name') == SEQUENCE_LENGTH_WARM_START_MIGRATION
+    ]
+    if not enabled:
+        if migrations:
+            raise ValueError(
+                'Sequence-length migration provenance requires the explicit '
+                'init-only warm-start config switch.'
+            )
+        return
+    if not bool(
+        getattr(
+            config,
+            'temporal_memory_attention_projection_only_enabled',
+            False,
+        )
+    ):
+        raise ValueError(
+            'Sequence-length warm-start is authorized only for '
+            'temporal_attention_projection_only training.'
+        )
+    if not isinstance(initialization_migrations, list) or (
+        len(initialization_migrations) != 1 or len(migrations) != 1
+    ):
+        raise ValueError(
+            'Enabled sequence-length warm-start requires the T16 -> T32 '
+            'record to be the sole initialization migration.'
+        )
+    migration = migrations[0]
+    expected = {
+        'source_sequence_length': SEQUENCE_LENGTH_WARM_START_SOURCE,
+        'target_sequence_length': SEQUENCE_LENGTH_WARM_START_TARGET,
+        'metadata_difference_allowlist': ['sequence_length'],
+        'state_dict_strict': True,
+    }
+    if {name: migration.get(name) for name in expected} != expected:
+        raise ValueError('Sequence-length warm-start migration metadata is invalid.')
+    if int(config.temporal_memory_sequence_length) != (
+        SEQUENCE_LENGTH_WARM_START_TARGET
+    ):
+        raise ValueError(
+            'Sequence-length warm-start checkpoint target metadata must be T{}.'.format(
+                SEQUENCE_LENGTH_WARM_START_TARGET
+            )
+        )
+    if initialized_from is None or initialized_from_sha256 is None:
+        raise ValueError(
+            'Sequence-length warm-start checkpoint requires parent path and SHA-256.'
+        )
+    if Path(migration.get('parent_checkpoint', '')).resolve() != Path(
+        initialized_from
+    ).resolve():
+        raise ValueError(
+            'Sequence-length warm-start parent checkpoint path provenance differs.'
+        )
+    if migration.get('parent_checkpoint_sha256') != str(initialized_from_sha256):
+        raise ValueError(
+            'Sequence-length warm-start parent checkpoint SHA-256 provenance differs.'
+        )
+    source_state_sha256 = str(migration.get('source_model_state_sha256', ''))
+    loaded_state_sha256 = str(migration.get('loaded_model_state_sha256', ''))
+    if (
+        len(source_state_sha256) != 64
+        or any(character not in '0123456789abcdef' for character in source_state_sha256)
+        or source_state_sha256 != loaded_state_sha256
+    ):
+        raise ValueError(
+            'Sequence-length warm-start state SHA-256 provenance is invalid.'
+        )
+
+
 def build_training_checkpoint(
     model,
     optimizer,
@@ -604,6 +701,13 @@ def build_training_checkpoint(
     initialization_migrations=None,
 ):
     """Build an epoch-boundary snapshot that can resume deterministically."""
+    initialization_migrations = list(initialization_migrations or [])
+    validate_sequence_length_warm_start_provenance(
+        config,
+        initialized_from,
+        initialized_from_sha256,
+        initialization_migrations,
+    )
     freeze_base_enabled = bool(
         getattr(config, 'temporal_memory_freeze_base_enabled', False)
     )
@@ -743,6 +847,13 @@ def build_training_checkpoint(
         'attention_projection_only_enabled': bool(
             attention_projection_only_enabled
         ),
+        'init_sequence_length_warm_start_enabled': bool(
+            getattr(
+                config,
+                'temporal_memory_init_sequence_length_warm_start_enabled',
+                False,
+            )
+        ),
         'temporal_attention_enabled': bool(
             getattr(
                 config,
@@ -796,7 +907,7 @@ def build_training_checkpoint(
                 if initialized_from_sha256 is None
                 else str(initialized_from_sha256)
             ),
-            'initialization_migrations': list(initialization_migrations or []),
+            'initialization_migrations': initialization_migrations,
             'resume_parent_checkpoint': (
                 None
                 if resume_parent_checkpoint is None
@@ -836,6 +947,44 @@ def load_training_resume(
             'as initialization instead.'.format(checkpoint_path)
         )
     validate_resume_config(checkpoint, current_config)
+    saved_memory = checkpoint.get('temporal_memory')
+    if not isinstance(saved_memory, dict):
+        raise ValueError('Resume checkpoint is missing temporal-memory metadata.')
+    saved_sequence_length = saved_memory.get('sequence_length')
+    if saved_sequence_length is None:
+        raise ValueError(
+            'Resume checkpoint is missing required sequence_length metadata.'
+        )
+    current_sequence_length = int(
+        current_config.temporal_memory_sequence_length
+    )
+    if int(saved_sequence_length) != current_sequence_length:
+        raise ValueError(
+            'Resume checkpoint sequence_length={} does not match configured '
+            '{}.'.format(saved_sequence_length, current_sequence_length)
+        )
+    saved_warm_start = bool(
+        saved_memory.get('init_sequence_length_warm_start_enabled', False)
+    )
+    current_warm_start = bool(
+        getattr(
+            current_config,
+            'temporal_memory_init_sequence_length_warm_start_enabled',
+            False,
+        )
+    )
+    if saved_warm_start != current_warm_start:
+        raise ValueError(
+            'Resume checkpoint sequence-length warm-start metadata does not '
+            'match its resolved configuration.'
+        )
+    provenance = checkpoint.get('provenance', {})
+    validate_sequence_length_warm_start_provenance(
+        current_config,
+        provenance.get('initialized_from'),
+        provenance.get('initialized_from_sha256'),
+        provenance.get('initialization_migrations', []),
+    )
     start_epoch = int(checkpoint['next_epoch'])
     if start_epoch < 0:
         raise ValueError('Resume checkpoint next_epoch must be non-negative.')
@@ -867,9 +1016,6 @@ def load_training_resume(
             'Resume optimizer parameter-group names/order {} do not match '
             'configured {}.'.format(saved_group_names, current_group_names)
         )
-    saved_memory = checkpoint.get('temporal_memory')
-    if not isinstance(saved_memory, dict):
-        raise ValueError('Resume checkpoint is missing temporal-memory metadata.')
     saved_density_version = validate_density_calibration_metadata(saved_memory)
     if hasattr(model, 'base') and hasattr(
         model.base,
@@ -1019,6 +1165,12 @@ def load_p23_base_weights(
     confidence_head_enabled=False,
     density_calibration_v2_enabled=False,
     initialization_migrations=None,
+    target_sequence_length=None,
+    sequence_length_warm_start_enabled=False,
+    temporal_bin_size=None,
+    log_count_clip=None,
+    trajectory_extrapolation_enabled=None,
+    attention_projection_only_enabled=False,
 ):
     checkpoint_path = Path(str(checkpoint_path).strip())
     if not checkpoint_path.is_file():
@@ -1033,6 +1185,14 @@ def load_p23_base_weights(
         saved_context_bins = saved_memory.get('context_bins')
         saved_width = saved_memory.get('width')
         saved_sequence_length = saved_memory.get('sequence_length')
+        target_sequence_length = int(
+            cfg.temporal_memory_sequence_length
+            if target_sequence_length is None
+            else target_sequence_length
+        )
+        sequence_length_warm_start_enabled = bool(
+            sequence_length_warm_start_enabled
+        )
         if (
             saved_context_bins is not None
             and int(saved_context_bins) != int(context_bins)
@@ -1046,13 +1206,80 @@ def load_p23_base_weights(
             raise ValueError(
                 'M5 width={} does not match {}.'.format(saved_width, width)
             )
-        if (
+        sequence_length_mismatch = (
             saved_sequence_length is not None
-            and int(saved_sequence_length) != int(cfg.temporal_memory_sequence_length)
-        ):
+            and int(saved_sequence_length) != target_sequence_length
+        )
+        if sequence_length_warm_start_enabled:
+            if not bool(attention_projection_only_enabled):
+                raise ValueError(
+                    'Sequence-length warm-start is authorized only for '
+                    'temporal_attention_projection_only training.'
+                )
+            if initialization_migrations is None:
+                raise ValueError(
+                    'Sequence-length warm-start requires an initialization '
+                    'migration provenance sink.'
+                )
+            if saved_sequence_length is None:
+                raise ValueError(
+                    'Sequence-length warm-start requires source sequence_length '
+                    'metadata.'
+                )
+            if (
+                int(saved_sequence_length) != SEQUENCE_LENGTH_WARM_START_SOURCE
+                or target_sequence_length != SEQUENCE_LENGTH_WARM_START_TARGET
+            ):
+                raise ValueError(
+                    'Sequence-length warm-start is restricted to T{} -> T{}, '
+                    'got T{} -> T{}.'.format(
+                        SEQUENCE_LENGTH_WARM_START_SOURCE,
+                        SEQUENCE_LENGTH_WARM_START_TARGET,
+                        saved_sequence_length,
+                        target_sequence_length,
+                    )
+                )
+            required_metadata = {
+                'temporal_bin_size': temporal_bin_size,
+                'context_bins': context_bins,
+                'width': width,
+                'log_count_clip': log_count_clip,
+                'trajectory_extrapolation_enabled': (
+                    trajectory_extrapolation_enabled
+                ),
+            }
+            missing_metadata = sorted(
+                name
+                for name, target_value in required_metadata.items()
+                if target_value is None or saved_memory.get(name) is None
+            )
+            if missing_metadata:
+                raise ValueError(
+                    'Sequence-length warm-start requires complete unchanged '
+                    'metadata: {}.'.format(', '.join(missing_metadata))
+                )
+            metadata_mismatches = []
+            for name, target_value in required_metadata.items():
+                source_value = saved_memory[name]
+                if name in {'temporal_bin_size', 'context_bins', 'width'}:
+                    matches = int(source_value) == int(target_value)
+                elif name == 'log_count_clip':
+                    matches = float(source_value) == float(target_value)
+                else:
+                    matches = bool(source_value) == bool(target_value)
+                if not matches:
+                    metadata_mismatches.append(name)
+            if metadata_mismatches:
+                raise ValueError(
+                    'Sequence-length warm-start permits only sequence_length '
+                    'metadata to differ; changed: {}.'.format(
+                        ', '.join(metadata_mismatches)
+                    )
+                )
+        elif sequence_length_mismatch:
             raise ValueError(
                 'M5 sequence_length={} does not match {}.'.format(
-                    saved_sequence_length, cfg.temporal_memory_sequence_length
+                    saved_sequence_length, target_sequence_length
                 )
             )
         saved_density_calibration = bool(
@@ -1130,6 +1357,11 @@ def load_p23_base_weights(
             or adding_temporal_attention
             or adding_dacc_v2
         )
+        if sequence_length_warm_start_enabled and adding_branch:
+            raise ValueError(
+                'Sequence-length warm-start permits no simultaneous model-branch '
+                'migration; every state_dict key must already match.'
+            )
         load_result = model.load_state_dict(
             checkpoint['model_state_dict'],
             strict=not adding_branch,
@@ -1160,6 +1392,55 @@ def load_p23_base_weights(
                         load_result.unexpected_keys,
                     )
                 )
+        if sequence_length_warm_start_enabled:
+            source_state = checkpoint['model_state_dict']
+            loaded_state = model.state_dict()
+            if set(source_state) != set(loaded_state):
+                raise RuntimeError(
+                    'Sequence-length warm-start state_dict keys changed.'
+                )
+            for name in sorted(source_state):
+                source_tensor = source_state[name]
+                loaded_tensor = loaded_state[name]
+                if (
+                    loaded_tensor.dtype != source_tensor.dtype
+                    or tuple(loaded_tensor.shape) != tuple(source_tensor.shape)
+                    or not torch.equal(
+                        _state_tensor_byte_view(loaded_tensor),
+                        _state_tensor_byte_view(source_tensor),
+                    )
+                ):
+                    raise RuntimeError(
+                        'Sequence-length warm-start changed state tensor: {}.'.format(
+                            name
+                        )
+                    )
+            source_state_sha256 = frozen_model_state_sha256(
+                source_state,
+                mutable_state_keys=(),
+            )
+            loaded_state_sha256 = frozen_model_state_sha256(
+                loaded_state,
+                mutable_state_keys=(),
+            )
+            if source_state_sha256 != loaded_state_sha256:
+                raise RuntimeError(
+                    'Sequence-length warm-start loaded-state SHA-256 differs '
+                    'from its parent.'
+                )
+            initialization_migrations.append(
+                {
+                    'name': SEQUENCE_LENGTH_WARM_START_MIGRATION,
+                    'source_sequence_length': int(saved_sequence_length),
+                    'target_sequence_length': target_sequence_length,
+                    'metadata_difference_allowlist': ['sequence_length'],
+                    'state_dict_strict': True,
+                    'parent_checkpoint': str(checkpoint_path.resolve()),
+                    'parent_checkpoint_sha256': sha256_file(checkpoint_path),
+                    'source_model_state_sha256': source_state_sha256,
+                    'loaded_model_state_sha256': loaded_state_sha256,
+                }
+            )
         if adding_dacc_v2:
             model_state = model.state_dict()
             source_state = checkpoint['model_state_dict']
@@ -1207,6 +1488,11 @@ def load_p23_base_weights(
         return checkpoint_path
 
     saved = checkpoint.get('temporal_frame', {})
+    if sequence_length_warm_start_enabled:
+        raise ValueError(
+            'Sequence-length warm-start requires a complete temporal-memory '
+            'checkpoint, not a temporal-frame/P23 checkpoint.'
+        )
     if density_calibration_v2_enabled:
         raise ValueError(
             'DACC-v2 requires a legacy temporal-memory checkpoint parent; '
@@ -2003,6 +2289,20 @@ if __name__ == '__main__':
             density_calibration_v2_enabled=dacc_v2_enabled,
             confidence_head_enabled=confidence_head_enabled,
             initialization_migrations=initialization_migrations,
+            target_sequence_length=cfg.temporal_memory_sequence_length,
+            sequence_length_warm_start_enabled=bool(
+                getattr(
+                    cfg,
+                    'temporal_memory_init_sequence_length_warm_start_enabled',
+                    False,
+                )
+            ),
+            temporal_bin_size=cfg.temporal_memory_bin_size,
+            log_count_clip=cfg.temporal_memory_log_count_clip,
+            trajectory_extrapolation_enabled=trajectory_enabled,
+            attention_projection_only_enabled=(
+                attention_projection_only_enabled
+            ),
         )
         initialized_from_sha256 = sha256_file(initialized_from)
         if head_only_enabled:

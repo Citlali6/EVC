@@ -269,6 +269,8 @@ TEMPORAL_MEMORY:
   temporal_memory_inference_batch_size: 8
   temporal_memory_model_path: ""
   temporal_memory_init_model_path: ""
+  # Init-only, strict T16 -> T32 warm-start. Resume and inference stay exact.
+  temporal_memory_init_sequence_length_warm_start_enabled: false
   temporal_memory_base_lr_multiplier: 0.1
   temporal_memory_memory_lr_multiplier: 1.0
   temporal_memory_freeze_base_enabled: false

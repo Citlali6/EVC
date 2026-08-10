@@ -318,6 +318,8 @@ TEMPORAL_MEMORY:
   temporal_memory_blend_model_path: ""
   temporal_memory_blend_primary_weight: 1.0
   temporal_memory_init_model_path: ""
+  # Init-only, strict T16 -> T32 warm-start. Resume and inference stay exact.
+  temporal_memory_init_sequence_length_warm_start_enabled: false
   temporal_memory_sparse_weight: 0.50
   temporal_memory_base_lr_multiplier: 1.0  # 本仓库改为 1.0（关键）：0.1 会饿死 base
   temporal_memory_memory_lr_multiplier: 1.0

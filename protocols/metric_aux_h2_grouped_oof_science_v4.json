@@ -1,0 +1,145 @@
+{
+  "schema": "ev-uav-temporal-memory-metric-aux-h2-grouped-oof-evaluation-recovery-v4",
+  "created_utc": "2026-08-10T14:24:00Z",
+  "status": "frozen_after_v3_probe_and_six_formal_training_before_any_v4_held_evaluation",
+  "experiment_id": "metric_aux_component_hard_negative_m23_fixed_h2_oof_v4_eval_only",
+  "evidence_class": "v3_probe_and_six_formal_runs_reuse_plus_evaluation_import_route_recovery_then_single_candidate_paired_three_fold_train_only_h2_grouped_oof",
+  "inheritance": {
+    "entire_v3_scientific_numeric_training_evaluation_and_promotion_definition_inherited": true,
+    "v3_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/metric_aux_h2_grouped_oof_science_v3.json",
+      "sha256": "a4039cdba26ed1f950d62b40edc4b13c9868ac281c0dcd6b5a37e2062cd79875"
+    },
+    "v3_runner": {
+      "workspace_relative_path": "EVC-work/run_metric_aux_h2_grouped_oof_v3.py",
+      "sha256": "968d2fa0bc32756c5f8b059d44d0b9413daf75396c7d55733a68d126d2148236"
+    },
+    "v3_tests": {
+      "workspace_relative_path": "EVC-work/tests/test_run_metric_aux_h2_grouped_oof_v3.py",
+      "sha256": "379ab2dcdeb1a7c291b2cf2ef623492cf024f6df19a1c7b22f6e807929ed278d"
+    },
+    "v3_command_audit": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/command_audit.json",
+      "sha256": "a369096bf1b716b40284e7da7d9ec9397ca82e6ecd783ec44b47404c0749c2ea"
+    },
+    "v3_resource_probe_receipt": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/resource_probe/runtime_result.json",
+      "sha256": "09e05f582b439525fb7d04006766258173c502af23b9b1acb6fe5846e95e2b06"
+    },
+    "v3_formal_pair_audit": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/pair_audit.json",
+      "sha256": "fcd4f877597ac1176d7215bcfd2ee82533f53fadfc2ac6558fc8563ae3ad2c9d"
+    },
+    "v3_evaluation_failure_receipt": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/held_train_evaluation_failure.json",
+      "sha256": "03c9061bd0313355411d06f1f6027faf9777b4ee14906d6f0d32d5848735ce82"
+    }
+  },
+  "recovery_amendment": {
+    "reason": "The first V3 held-train evaluation aborted while importing temporal_frame_video_from_sample from utils.temporal_memory_inference, where that symbol does not exist. The established full-stream constructor is in utils.temporal_frame_inference.",
+    "selection_timing": "The single import-route correction was frozen after the V3 import-stage failure and before any held source load, prediction, score tensor, postprocessing or sufficient-count computation.",
+    "v3_evaluation_attempt_remains_failed": true,
+    "retroactive_v3_evaluation_pass_forbidden": true,
+    "reuse_v3_probe_required": true,
+    "reuse_all_six_v3_formal_training_runs_required": true,
+    "new_probe_allowed": false,
+    "new_training_allowed": false,
+    "new_training_optimizer_steps": 0,
+    "scientific_candidate_training_evaluation_settings_folds_or_promotion_change": false,
+    "changed_contract_only": "evaluation import routing for temporal_frame_video_from_sample",
+    "claim_scope": "incremental_finetune_transfer_not_fold_clean_model_generalization",
+    "shared_parent_pretraining_exposure": true
+  },
+  "evaluation_api_contract": {
+    "frozen_evaluate_owner": {
+      "workspace_relative_path": "EVC-work/run_metric_aux_h2_grouped_oof.py",
+      "sha256": "9b3f58a8ed4676e78bf75b3daaf33e96b7218f752088e4e7726da7dbeaa3cf5a"
+    },
+    "memory_inference_module": {
+      "workspace_relative_path": "EVC-work/utils/temporal_memory_inference.py",
+      "sha256": "8b388094b1cf4504db5f823a5de6cc4d41793f69b1cf8822e16bb10eb59a9610",
+      "must_not_define_temporal_frame_video_from_sample_before_or_after_call": true
+    },
+    "temporal_frame_inference_module": {
+      "workspace_relative_path": "EVC-work/utils/temporal_frame_inference.py",
+      "sha256": "2203dd11d69041352ddc5ccb9bb7148c7dbcda4803554fcd2cc120345a05e479",
+      "required_symbol": "temporal_frame_video_from_sample",
+      "required_signature_positional_parameters": ["sample", "temporal_bin_size", "whole_t"]
+    },
+    "temporary_injection": {
+      "target": "utils.temporal_memory_inference.temporal_frame_video_from_sample",
+      "source": "utils.temporal_frame_inference.temporal_frame_video_from_sample",
+      "scope": "one frozen base evaluate_spec call",
+      "finally_restore_required": true,
+      "persistent_module_mutation_allowed": false
+    },
+    "full_stream_semantics_unchanged": true,
+    "predictor_api_unchanged": true,
+    "postprocess_and_sufficient_count_api_unchanged": true,
+    "evaluation_payload_must_bind_v4_protocol_and_runner": true
+  },
+  "v3_formal_training_evidence": {
+    "hold_g1_baseline": {
+      "training_result": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_baseline/runtime_result.json", "sha256": "2742b8688caed0f2269385a14df1bb1916d4bf4116531f2d2d526221e820c11f"},
+      "e3_checkpoint": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_baseline/model/runs/20260810-220213_seed49_pid39964/epoch_003_seed49.pt", "sha256": "752172260f19ab4ef78b601f3ed62a6d5136db779f004e7b4cd7ba2c1ce2882a"},
+      "expected_optimizer_steps": 168
+    },
+    "hold_g1_metric_aux": {
+      "training_result": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_metric_aux/runtime_result.json", "sha256": "616477dc3aef69f2d798cca55bed94727178e056b3e2ef86d2fce9a497cbd53d"},
+      "e3_checkpoint": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_metric_aux/model/runs/20260810-220332_seed49_pid41824/epoch_003_seed49.pt", "sha256": "59fb7b0c92294b6225c4e575a4aa7fa0977761eb3a1b14cf676a5b79be117b12"},
+      "expected_optimizer_steps": 168
+    },
+    "hold_g2_baseline": {
+      "training_result": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_baseline/runtime_result.json", "sha256": "93f7c8ff4e6096042efafc7c86a765e25263dbab76b460a80906e2629515437b"},
+      "e3_checkpoint": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_baseline/model/runs/20260810-220450_seed49_pid50852/epoch_003_seed49.pt", "sha256": "258f1ad67ebd6c7108b186b8aad3dfc49d18368c110607468fad6a618fba0955"},
+      "expected_optimizer_steps": 192
+    },
+    "hold_g2_metric_aux": {
+      "training_result": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_metric_aux/runtime_result.json", "sha256": "e08301b44c8c7a0adfe91b8015ee355a2d42831496ab1d5b027eb5fe8a519dc6"},
+      "e3_checkpoint": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_metric_aux/model/runs/20260810-220617_seed49_pid47452/epoch_003_seed49.pt", "sha256": "14a8956e8e50d281ed6deb642cae27d3026130597ac4ea05c348e10523f81da3"},
+      "expected_optimizer_steps": 192
+    },
+    "hold_g3_baseline": {
+      "training_result": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_baseline/runtime_result.json", "sha256": "596c729682e8028b8d2ecb5bbd0459c290f5986944283bc14b87c539c4762240"},
+      "e3_checkpoint": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_baseline/model/runs/20260810-220746_seed49_pid47268/epoch_003_seed49.pt", "sha256": "fb767a29bb2c7fc32075a9d8ece2e5ff2c2ae2297da1e465c858ab81dccee19e"},
+      "expected_optimizer_steps": 168
+    },
+    "hold_g3_metric_aux": {
+      "training_result": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_metric_aux/runtime_result.json", "sha256": "88eaa8ae09d08a353d3225bbd6f2376f1642c7e9daa94094274e44b1ecce3a62"},
+      "e3_checkpoint": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_metric_aux/model/runs/20260810-220902_seed49_pid40704/epoch_003_seed49.pt", "sha256": "6e59d216cc9ef3a8dfb49b0778cde9aa56d8b6bb4052f09fb6ba94aeabb72297"},
+      "expected_optimizer_steps": 168
+    }
+  },
+  "evaluation_and_report_contract": {
+    "evaluation_count": 9,
+    "variants_in_order": ["released_m20", "baseline", "metric_aux"],
+    "held_complete_full_stream_t160": true,
+    "t32_read_or_combined": false,
+    "prediction_threshold_and_effective_c00_inherited_exact": true,
+    "fold_membership_order_inherited_exact": true,
+    "released_m20_and_paired_e3_checkpoint_anchors_inherited_exact": true,
+    "double_anchor_each_fold_and_pooled_promotion_gates_inherited_exact": true,
+    "new_v4_result_directory_required": true,
+    "no_clobber": true
+  },
+  "cli_contract": {
+    "allowed_commands": ["audit", "evaluate", "report", "all-evaluate-report"],
+    "train_command_exposed": false,
+    "probe_command_exposed": false,
+    "audit_training_command_exposed": false,
+    "all_after_probe_command_exposed": false,
+    "gpu_authorization_required_for_evaluate": true
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260810_metric_aux_h2_grouped_oof_v4",
+    "v1_v2_v3_outputs_read_only": true,
+    "held_evaluations_subdirectory": "held_train_evaluation",
+    "report_filename": "grouped_oof_report.json",
+    "command_audit_filename": "command_audit.json",
+    "no_clobber": true
+  },
+  "validation_or_test_read_allowed": false,
+  "t32_allowed": false,
+  "prior_persistence_formal_artifact_read_allowed": false,
+  "platform_submission_allowed": false
+}

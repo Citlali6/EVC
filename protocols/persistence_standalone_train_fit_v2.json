@@ -1,0 +1,215 @@
+{
+  "schema": "ev-uav-persistence-standalone-train-fit-protocol-v2",
+  "created_utc": "2026-08-10T11:23:42.4239853Z",
+  "status": "frozen_before_h2_only_final_fit",
+  "candidate_id": "persistence_pw08_kp050",
+  "evidence_class": "train_only_h2_final_fit_and_replay_after_frozen_five_fold_selection",
+  "estimator_correction": {
+    "supersedes_protocol_sha256": "131096c0968994c7098ddf117e410ebda2bcd26ba8e0fe18e771a1f9c237177c",
+    "supersedes_artifact_sha256": "2c02d0aa6c8f4eec44273ac6004972c3531b1c9d5b4a885e91321e75b40a3151",
+    "supersedes_train_replay_sha256": "03e6ed480fc2f3668122f01a1ffb7fb580d9bc5ff9e5841053ab562f09f6c33f",
+    "reason": "The H2 OOF folds fit only the other H2 sources. Including H1 in the final estimator changes the deployed H2 model and produced 20 different H2 component decisions in the audit.",
+    "superseded_outputs_must_not_enter_validation": true
+  },
+  "selection_disclosure": {
+    "candidate_selected_before_t32_validation_failure": true,
+    "standalone_replay_order_adapted_after_t32_failure": true,
+    "independent_held_claim_allowed": false,
+    "candidate_grid_count": 7,
+    "candidate_grid_shared_the_same_five_oof_folds": true,
+    "pooled_oof_score_delta": 0.0027612608608994504,
+    "pooled_oof_delta_is_selection_affected_not_independent": true,
+    "required_wording": "Seven candidates shared the same five train-only OOF folds; persistence_pw08_kp050 was selected from that grid, so its +0.002761 pooled OOF delta is selection-affected and not an independent estimate. The later standalone val24 replay is sequence-adaptive after the T32 failure."
+  },
+  "split_access": {
+    "allowed": [
+      "official train raw NPZ for the 11 frozen H2 fit sources",
+      "existing immutable full-stream M20 train cache for H2 fitting and all 15 H1/H2 replay sources",
+      "train labels and target ids for H2 final fitting and train replay metrics",
+      "frozen train-only grouped OOF v2 report"
+    ],
+    "forbidden": [
+      "validation raw source, score cache, labels, target ids, or report",
+      "test source, cache, labels, target ids, or report",
+      "T32 score cache for fitting or replay"
+    ],
+    "gpu_allowed": false,
+    "validation_or_test_read": false
+  },
+  "winner_binding": {
+    "report_workspace_relative_path": "experiments/20260810_persistent_pixel_prior_grouped_oof_v1/grouped_oof_report_v2.json",
+    "report_sha256": "acfdda1910305834ad217117b3c237fb496050aa1c6d3f0669594feaac3e96ae",
+    "report_schema": "ev-uav-persistent-pixel-prior-grouped-oof-v1",
+    "expected_conservative_winner": "persistence_pw08_kp050",
+    "definition": {
+      "family": "persistence",
+      "positive_weight": 8.0,
+      "keep_probability": 0.5
+    },
+    "required_oof_checks": {
+      "conservative_gate_passed": true,
+      "nonnegative_score_fold_count": 5,
+      "true_positive_event_delta": 0,
+      "correct_object_delta": 0,
+      "pd_delta": 0.0,
+      "iou_delta_minimum": 0.0,
+      "fa_delta_maximum": 0.0
+    }
+  },
+  "inputs": {
+    "full_m20_train_cache_manifest": {
+      "workspace_relative_path": "experiments/20260810_component_reranker_crosssource_v1/train_cache_gt30000/manifest.json",
+      "sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+      "schema": "ev-uav-component-reranker-train-cache-v1",
+      "selected_video_count": 54,
+      "selected_event_count": 8555762
+    },
+    "reference_protocol": {
+      "workspace_relative_path": "experiments/20260810_component_reranker_crosssource_v1/crossfit_protocol.json",
+      "sha256": "babd85216e83c3e6324d2ddc06d39c0c38669e4a7da6f65ea5884dca6ecfb9d2"
+    },
+    "config": {
+      "workspace_relative_path": "EVC-work/configs/evisseg_evuav.yaml",
+      "current_sha256": "c4157f6e04fb96be1fe9bef6ed87004b1e7da0d72507a43091e9f929345f2ec9",
+      "cache_generation_sha256": "565ff176820bb1ae0e9002c17487f6e8680a417a84521a066cde81a01720237b",
+      "config_files_are_byte_different": true,
+      "effective_settings_source": "current config plus frozen reference-protocol overrides and strict C00 validation",
+      "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+      "effective_c00_matches_cache_generation_contract": true
+    },
+    "released_m20_checkpoint_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "raw_train_root_workspace_relative_path": "datasets/EV-UAV-Challenge2/train",
+    "source_code_sha256": {
+      "crossfit_persistent_pixel_prior.py": "68818b5115cce229eefd3c83337cf8af734b1ef57aa94cb9dd6d3e488f5160b3",
+      "crossfit_component_reranker.py": "ec4d0af1abf8dab88037d8731ad1b142aa8cdb76511287d866113865d70e9561",
+      "utils/component_reranker.py": "92886c947c1737eaaeeddac966d25499df4957f51ceba7599391bad1c0257ac8",
+      "utils/postprocess.py": "a43e2a22947f5307cdb01b810a4f1dc8d4fb624b14bd068baf1e9087ca5d1aa4",
+      "utils/eval.py": "cb9de56b54a7153d80a2fd32432188665e830e0a9b945965f2cbd6765bb354e5",
+      "utils/challenge_eval.py": "a09e9a4b74abb06864e4551778addd624e53654041c98a41dbe61a1f67fbc952"
+    }
+  },
+  "population": {
+    "fit_source_count": 11,
+    "fit_h2_sources": [
+      "train_088.npz",
+      "train_089.npz",
+      "train_090.npz",
+      "train_091.npz",
+      "train_092.npz",
+      "train_093.npz",
+      "train_094.npz",
+      "train_095.npz",
+      "train_096.npz",
+      "train_097.npz",
+      "train_098.npz"
+    ],
+    "identity_audit_source_count": 4,
+    "identity_only_h1_sources": [
+      "train_044.npz",
+      "train_045.npz",
+      "train_046.npz",
+      "train_047.npz"
+    ],
+    "h1_fit_mass": 0.0,
+    "raw_source_sha256": {
+      "train_044.npz": "e1634dcdd447f74292b04ed0aafd5f4cc7797509c5e9d67547afc6f85ad0b379",
+      "train_045.npz": "de620db3fbfcf436d32d3ee37a050308998bbc67b195d93cb5d8f51c01d9aa1d",
+      "train_046.npz": "12df9ff6a7c9729973dfa3dc6819342acb2d98461f809bcb1f7c9dfaec055924",
+      "train_047.npz": "638897c19b261ec5e1136dbde305643531815e0066d5923093af1b6bf96f924d",
+      "train_088.npz": "29d5bbc31d23b38a91d349896a530b2d416224db4b464b1ae45c355b94b1ec10",
+      "train_089.npz": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb",
+      "train_090.npz": "5de16df85ee466b7ee1d8ecbf465a8cbfe64d2029b7b7a895cc181ca75559102",
+      "train_091.npz": "7314cdd6627d9bf538656abc7e098b8fd21e79038591e5a941187844eb7aed7e",
+      "train_092.npz": "9b8707627ac1bbcd471bbff7fc9b02fafbe5c6dd0f54857dbb158fb8916eeca6",
+      "train_093.npz": "460e45e7bc5d3df8a1a1dbd8a19427c95d130937ec3e4912c2dda3f693456338",
+      "train_094.npz": "8c5f985c75abeac73cc87e3419deb461ba508fc16fe1411b98b4f70f15458eec",
+      "train_095.npz": "b86e9b764b3bd9e151d9657a4a0b5c3255e0296882c3b367131f31443bf2eeb3",
+      "train_096.npz": "7c136b7dbb8ad85ddc43c50ef2886c062ac9ab7e9927951ecc6c67e7ea397a7c",
+      "train_097.npz": "3583cd09272702cf1da8caf76f7b802856c41394555b0c990124c08515d16ac5",
+      "train_098.npz": "0a60a0dc6f80258ec428f97b30e2be683fd2d35391b0a76801ca4c8a3585ee13"
+    }
+  },
+  "final_fit": {
+    "family": "persistence_only",
+    "feature_dtype": "float64",
+    "feature_names": [
+      "pixel_log_events_mean",
+      "pixel_log_events_max",
+      "pixel_active_fraction_mean",
+      "pixel_active_fraction_max",
+      "pixel_longest_run_fraction_mean",
+      "pixel_longest_run_fraction_max",
+      "pixel_collision_fraction_mean",
+      "pixel_collision_fraction_max",
+      "pixel_log_max_bin_events_mean",
+      "pixel_log_max_bin_events_max",
+      "pixel_polarity_dominance_mean",
+      "pixel_polarity_dominance_max",
+      "neighbor_active_fraction_mean",
+      "neighbor_active_fraction_max"
+    ],
+    "equal_video_weighting": "each of 11 H2 fit videos has mass 1/11; each candidate component within a fit video receives mass (1/11)/component_count before class weighting",
+    "positive_weight": 8.0,
+    "keep_probability": 0.5,
+    "l2_penalty": 0.1,
+    "max_newton_iterations": 50,
+    "feature_semantics": {
+      "complete_temporal_bins": 160,
+      "log_count": "unclipped numpy.log1p of complete-video per-pixel event count",
+      "log_max_bin_events": "unclipped numpy.log1p of maximum per-pixel events in any one of 160 bins",
+      "active_fraction": "number of active bins divided by 160",
+      "longest_run_fraction": "longest consecutive active-bin run divided by 160",
+      "collision_fraction": "1 - active_bin_count / event_count for each pixel",
+      "polarity_dominance": "abs(2 * positive_polarity_fraction - 1) for each pixel",
+      "neighbor_active_fraction": "normalized 3x3 cv2.boxFilter over active_fraction with BORDER_REPLICATE, float32 filter result cast to float64",
+      "component_aggregation": "for each field, mean then max over component events; repeated events at the same pixel repeat that pixel value in the mean"
+    },
+    "component_topology": {
+      "spatial_radius": 1,
+      "temporal_bin_size": 50,
+      "max_link_distance": 6.0,
+      "max_gap_bins": 1,
+      "max_component_events": 3
+    },
+    "prediction_threshold": 0.719,
+    "temporal_bin_count": 160,
+    "video_duration": 8000,
+    "resolution": [346, 260]
+  },
+  "standalone_runtime": {
+    "stage_order": [
+      "released raw M20 full-stream T160 probabilities",
+      "frozen P0/P0c postprocess",
+      "extract candidates with topology spatial_radius=1, temporal_bin_size=50, max_link_distance=6, max_gap_bins=1, max_component_events=3",
+      "derive the frozen 14 persistence features in their listed order and compute the logistic keep probability",
+      "keep probability >=0.5; zero only rejected candidate component events and never raise or otherwise alter a score",
+      "frozen P18 recovery"
+    ],
+    "t32_allowed": false,
+    "eligible_route": "event_count>200000 and polarity minority fraction>=0.20",
+    "eligible_action": "persistence component suppression",
+    "ineligible_action": "exact same score tensor object and bits with no component extraction or model call",
+    "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413"
+  },
+  "train_replay": {
+    "required_checks": [
+      "H2-only artifact exactly equals direct 11-H2 equal-video fit",
+      "all 11 H2 persistence features and component indices equal the frozen experimental chain",
+      "all 11 H2 per-component keep probabilities equal the direct fitted-model probabilities element by element",
+      "all 11 H2 standalone outputs equal the original persistence-only suppression",
+      "all 4 H1 sources return bitwise and object identity without component extraction",
+      "runtime component/model calls occur only for H2",
+      "T32 is never read or combined",
+      "H2 aggregate true-positive events and correct objects have exactly zero loss",
+      "effective C00 canonical SHA-256 equals 5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+      "CUDA is not initialized"
+    ]
+  },
+  "outputs": {
+    "workspace_relative_directory": "experiments/20260810_persistence_standalone_v2",
+    "artifact": "persistence_pw08_kp050_h2only.json",
+    "artifact_sha256_sidecar": "persistence_pw08_kp050_h2only.json.sha256",
+    "train_replay_report": "train_replay_report.json",
+    "train_replay_report_sha256_sidecar": "train_replay_report.json.sha256"
+  }
+}

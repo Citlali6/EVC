@@ -1,0 +1,203 @@
+{
+  "schema": "ev-uav-persistence-standalone-train-fit-protocol-v1",
+  "created_utc": "2026-08-10T11:08:28.0953629Z",
+  "status": "frozen_before_final_15_source_fit",
+  "candidate_id": "persistence_pw08_kp050",
+  "evidence_class": "train_only_final_fit_and_replay_after_frozen_five_fold_selection",
+  "selection_disclosure": {
+    "candidate_selected_before_t32_validation_failure": true,
+    "standalone_replay_order_adapted_after_t32_failure": true,
+    "independent_held_claim_allowed": false,
+    "required_wording": "The persistence candidate was selected by frozen train-only five-fold OOF before the T32 validation failure, but this standalone replay was sequenced adaptively afterward and is not an independent held estimate."
+  },
+  "split_access": {
+    "allowed": [
+      "official train raw NPZ for the 15 frozen H1/H2 sources",
+      "existing immutable full-stream M20 train cache for those sources",
+      "train labels and target ids for final fitting and train replay metrics",
+      "frozen train-only grouped OOF v2 report"
+    ],
+    "forbidden": [
+      "validation raw source",
+      "validation score cache",
+      "validation labels or target ids",
+      "validation report",
+      "test source, cache, labels, or report",
+      "T32 score cache for fitting or replay"
+    ],
+    "gpu_allowed": false,
+    "validation_or_test_read": false
+  },
+  "winner_binding": {
+    "report_workspace_relative_path": "experiments/20260810_persistent_pixel_prior_grouped_oof_v1/grouped_oof_report_v2.json",
+    "report_sha256": "acfdda1910305834ad217117b3c237fb496050aa1c6d3f0669594feaac3e96ae",
+    "report_schema": "ev-uav-persistent-pixel-prior-grouped-oof-v1",
+    "field": "pooled_oof.conservative_winner_candidate_id",
+    "expected_value": "persistence_pw08_kp050",
+    "definition": {
+      "family": "persistence",
+      "positive_weight": 8.0,
+      "keep_probability": 0.5
+    },
+    "required_oof_checks": {
+      "conservative_gate_passed": true,
+      "nonnegative_score_fold_count": 5,
+      "true_positive_event_delta": 0,
+      "correct_object_delta": 0,
+      "pd_delta": 0.0,
+      "iou_delta_minimum": 0.0,
+      "fa_delta_maximum": 0.0
+    }
+  },
+  "inputs": {
+    "full_m20_train_cache_manifest": {
+      "workspace_relative_path": "experiments/20260810_component_reranker_crosssource_v1/train_cache_gt30000/manifest.json",
+      "sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+      "schema": "ev-uav-component-reranker-train-cache-v1",
+      "selected_video_count": 54,
+      "selected_event_count": 8555762
+    },
+    "reference_protocol": {
+      "workspace_relative_path": "experiments/20260810_component_reranker_crosssource_v1/crossfit_protocol.json",
+      "sha256": "babd85216e83c3e6324d2ddc06d39c0c38669e4a7da6f65ea5884dca6ecfb9d2"
+    },
+    "config": {
+      "workspace_relative_path": "EVC-work/configs/evisseg_evuav.yaml",
+      "current_sha256": "c4157f6e04fb96be1fe9bef6ed87004b1e7da0d72507a43091e9f929345f2ec9",
+      "cache_generation_sha256": "565ff176820bb1ae0e9002c17487f6e8680a417a84521a066cde81a01720237b",
+      "effective_settings_source": "current config plus frozen reference-protocol overrides, followed by strict C00 validation"
+    },
+    "released_m20_checkpoint_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "raw_train_root_workspace_relative_path": "datasets/EV-UAV-Challenge2/train",
+    "source_code_sha256": {
+      "crossfit_persistent_pixel_prior.py": "68818b5115cce229eefd3c83337cf8af734b1ef57aa94cb9dd6d3e488f5160b3",
+      "crossfit_component_reranker.py": "ec4d0af1abf8dab88037d8731ad1b142aa8cdb76511287d866113865d70e9561",
+      "utils/component_reranker.py": "92886c947c1737eaaeeddac966d25499df4957f51ceba7599391bad1c0257ac8",
+      "utils/postprocess.py": "a43e2a22947f5307cdb01b810a4f1dc8d4fb624b14bd068baf1e9087ca5d1aa4",
+      "utils/eval.py": "cb9de56b54a7153d80a2fd32432188665e830e0a9b945965f2cbd6765bb354e5",
+      "utils/challenge_eval.py": "a09e9a4b74abb06864e4551778addd624e53654041c98a41dbe61a1f67fbc952"
+    }
+  },
+  "population": {
+    "source_count": 15,
+    "h1_sources": [
+      "train_044.npz",
+      "train_045.npz",
+      "train_046.npz",
+      "train_047.npz"
+    ],
+    "h2_sources": [
+      "train_088.npz",
+      "train_089.npz",
+      "train_090.npz",
+      "train_091.npz",
+      "train_092.npz",
+      "train_093.npz",
+      "train_094.npz",
+      "train_095.npz",
+      "train_096.npz",
+      "train_097.npz",
+      "train_098.npz"
+    ],
+    "raw_source_sha256": {
+      "train_044.npz": "e1634dcdd447f74292b04ed0aafd5f4cc7797509c5e9d67547afc6f85ad0b379",
+      "train_045.npz": "de620db3fbfcf436d32d3ee37a050308998bbc67b195d93cb5d8f51c01d9aa1d",
+      "train_046.npz": "12df9ff6a7c9729973dfa3dc6819342acb2d98461f809bcb1f7c9dfaec055924",
+      "train_047.npz": "638897c19b261ec5e1136dbde305643531815e0066d5923093af1b6bf96f924d",
+      "train_088.npz": "29d5bbc31d23b38a91d349896a530b2d416224db4b464b1ae45c355b94b1ec10",
+      "train_089.npz": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb",
+      "train_090.npz": "5de16df85ee466b7ee1d8ecbf465a8cbfe64d2029b7b7a895cc181ca75559102",
+      "train_091.npz": "7314cdd6627d9bf538656abc7e098b8fd21e79038591e5a941187844eb7aed7e",
+      "train_092.npz": "9b8707627ac1bbcd471bbff7fc9b02fafbe5c6dd0f54857dbb158fb8916eeca6",
+      "train_093.npz": "460e45e7bc5d3df8a1a1dbd8a19427c95d130937ec3e4912c2dda3f693456338",
+      "train_094.npz": "8c5f985c75abeac73cc87e3419deb461ba508fc16fe1411b98b4f70f15458eec",
+      "train_095.npz": "b86e9b764b3bd9e151d9657a4a0b5c3255e0296882c3b367131f31443bf2eeb3",
+      "train_096.npz": "7c136b7dbb8ad85ddc43c50ef2886c062ac9ab7e9927951ecc6c67e7ea397a7c",
+      "train_097.npz": "3583cd09272702cf1da8caf76f7b802856c41394555b0c990124c08515d16ac5",
+      "train_098.npz": "0a60a0dc6f80258ec428f97b30e2be683fd2d35391b0a76801ca4c8a3585ee13"
+    }
+  },
+  "final_fit": {
+    "family": "persistence_only",
+    "feature_names": [
+      "pixel_log_events_mean",
+      "pixel_log_events_max",
+      "pixel_active_fraction_mean",
+      "pixel_active_fraction_max",
+      "pixel_longest_run_fraction_mean",
+      "pixel_longest_run_fraction_max",
+      "pixel_collision_fraction_mean",
+      "pixel_collision_fraction_max",
+      "pixel_log_max_bin_events_mean",
+      "pixel_log_max_bin_events_max",
+      "pixel_polarity_dominance_mean",
+      "pixel_polarity_dominance_max",
+      "neighbor_active_fraction_mean",
+      "neighbor_active_fraction_max"
+    ],
+    "equal_video_weighting": "each of 15 videos has mass 1/15; each candidate component within a video receives mass (1/15)/component_count before class weighting",
+    "positive_weight": 8.0,
+    "keep_probability": 0.5,
+    "l2_penalty": 0.1,
+    "max_newton_iterations": 50,
+    "standardization": "weighted mean and population scale using equal-video base weights",
+    "component_topology": {
+      "spatial_radius": 1,
+      "temporal_bin_size": 50,
+      "max_link_distance": 6.0,
+      "max_gap_bins": 1,
+      "max_component_events": 3
+    },
+    "prediction_threshold": 0.719,
+    "temporal_bin_count": 160,
+    "video_duration": 8000,
+    "resolution": [
+      346,
+      260
+    ]
+  },
+  "standalone_runtime": {
+    "upstream": "released M20 full-stream T160 scores with frozen threshold 0.719 and C00 postprocess",
+    "t32_allowed": false,
+    "route": {
+      "event_count_operator": ">",
+      "event_count_cutoff": 200000,
+      "polarity_minority_operator": ">=",
+      "polarity_minority_cutoff": 0.2,
+      "route_name": "h2"
+    },
+    "eligible_action": "extract frozen small-component chain from C00 scores, derive x/y/t/p lifetime features, keep probability>=0.5, zero rejected component events",
+    "ineligible_action": "return the exact input score tensor/object without component extraction, prediction, or copying",
+    "labels_or_target_ids_allowed": false
+  },
+  "train_replay": {
+    "source_count": 15,
+    "required_checks": [
+      "artifact model exactly equals direct frozen all-15 equal-video fit",
+      "standalone persistence features equal the frozen experimental feature chain",
+      "standalone candidate component indices equal the frozen experimental component chain",
+      "standalone output equals original persistence-only suppression on all eligible H2 sources",
+      "H1 sources return bitwise and object identity",
+      "runtime never consumes T32 scores",
+      "CUDA is not initialized"
+    ]
+  },
+  "validation_promotion_gates_to_freeze_separately": {
+    "score_delta": ">0.0001",
+    "pd_delta": ">=0",
+    "iou_delta": ">=0",
+    "fa_delta": "<=0",
+    "true_positive_event_delta": "=0",
+    "correct_target_delta": "=0",
+    "non_h2_bitwise_identity": true,
+    "candidate_runtime_calls_only_h2": true,
+    "all_required": true
+  },
+  "outputs": {
+    "workspace_relative_directory": "experiments/20260810_persistence_standalone_v1",
+    "artifact": "persistence_pw08_kp050.json",
+    "artifact_sha256_sidecar": "persistence_pw08_kp050.json.sha256",
+    "train_replay_report": "train_replay_report.json",
+    "train_replay_report_sha256_sidecar": "train_replay_report.json.sha256"
+  }
+}

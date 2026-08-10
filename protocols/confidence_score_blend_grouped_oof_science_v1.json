@@ -1,0 +1,208 @@
+{
+  "schema": "ev-uav-confidence-score-blend-grouped-oof-science-v1",
+  "evidence_class": "train_only_grouped_oof_candidate_selection_not_independent_final_estimate",
+  "frozen_before_confidence_score_cache_or_fusion_label_evaluation": true,
+  "split_access": {
+    "dataset_split": "train",
+    "validation_or_test_allowed": false,
+    "cache_stage_allowed": [
+      "complete official train x/y/t/p for the 15 preregistered H1/H2 sources",
+      "released M20 raw train scores for label-free monotonicity checks"
+    ],
+    "cache_stage_forbidden": [
+      "labels",
+      "target ids",
+      "validation",
+      "test"
+    ],
+    "evaluation_stage_allowed_after_all_hash_checks": [
+      "official train labels and target ids in the bound train cache"
+    ]
+  },
+  "baseline": {
+    "checkpoint_role": "released_m20_full_stream",
+    "checkpoint_path": "F:\\小目标检测\\EVC-work\\checkpoints\\m20_attn_dense_views8_epoch_003_seed48.pt",
+    "checkpoint_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "label_score_cache_manifest": "F:\\小目标检测\\experiments\\20260810_component_reranker_crosssource_v1\\train_cache_gt30000\\manifest.json",
+    "label_score_cache_manifest_sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+    "identity_score_cache_manifest": "F:\\小目标检测\\experiments\\20260810_temporal_input_route_v1\\formal_train_score_cache_v3\\manifest.json",
+    "identity_score_cache_manifest_sha256": "78ca63efd1fd8fda62dcccb1203f0e69000007454a391b7d46455f9952cf2dc7",
+    "identity_audit": "all 15 released-M20 full score vectors are bitwise equal between the two bound train-only caches"
+  },
+  "candidate": {
+    "candidate_id": "confidence_only_seed49_epoch003_train_loss_best",
+    "checkpoint_path": "F:\\小目标检测\\experiments\\20260810_confidence_only_lr1e4_seed49\\model\\runs\\20260810-052126_seed49_pid24136\\best_loss_seed49.pt",
+    "checkpoint_sha256": "c578e27cd4e05d1837fcf969b989cd3911dcbe979a0926aa386f4be51f4ceaa5",
+    "bytewise_aliases": [
+      "epoch_003_seed49.pt",
+      "last_seed49.pt"
+    ],
+    "checkpoint_epoch_zero_based": 2,
+    "selection_source": "minimum train loss only; validation_start_epoch was 40 for a 3-epoch run",
+    "training_scope": "confidence_only",
+    "training_config_path": "F:\\小目标检测\\experiments\\20260810_confidence_only_lr1e4_seed49\\model\\runs\\20260810-052126_seed49_pid24136\\config.yaml",
+    "training_config_sha256": "e538eebd18ee5bbc2f36486a25986ab76b40a6f1b88b3382468c05db31f3af45",
+    "run_summary_path": "F:\\小目标检测\\experiments\\20260810_confidence_only_lr1e4_seed49\\model\\runs\\20260810-052126_seed49_pid24136\\run_summary.json",
+    "run_summary_sha256": "536eb8210db94990e3dd0198ee5759c558bf7ff18b06750b7f0584a9bba79dfa",
+    "training_git_commit": "a0ff607ad43d49974fd66902e28594f28a761d11",
+    "training_git_dirty": false,
+    "resolved_learning_rate": 0.00001,
+    "directory_name_learning_rate_is_not_authoritative": true,
+    "base_identity_contract": {
+      "common_m20_tensor_count": 89,
+      "bitwise_unchanged_common_tensor_count": 89,
+      "added_confidence_tensor_count": 5,
+      "trainable_parameter_count": 2353,
+      "inference_score": "released_m20_probability * sigmoid(confidence_logit)"
+    }
+  },
+  "inference": {
+    "candidate_mode": "full_stream_t160",
+    "baseline_mode": "full_stream_t160",
+    "temporal_bin_size": 50,
+    "temporal_bin_count": 160,
+    "context_bins": 5,
+    "sequence_length": 16,
+    "model_width": 16,
+    "resolution": [346, 260],
+    "inference_batch_size": 8,
+    "log_count_clip": 4.0,
+    "prediction_threshold": 0.719,
+    "postprocess_profile": "released_M20_C00_fixed"
+  },
+  "runtime_route": {
+    "eligibility": "event_count > 200000 and input-only route domain is h1 or h2",
+    "eligible_domains": ["h1", "h2"],
+    "route_uses_complete_input": true,
+    "route_uses_source_name": false,
+    "route_uses_labels": false,
+    "route_policy_sha256": "f7835bc89d2ad4c3d29b46acc23f237bafd89e05cc1d983208fddf492480a836",
+    "candidate_branch_override": "confidence candidate remains full-stream in both eligible domains; no T32/window score enters this experiment"
+  },
+  "blend": {
+    "score_space": "probability",
+    "arithmetic": "float32((1-alpha)*released_m20_full + alpha*confidence_full)",
+    "identity_control_alpha": 0.0,
+    "alpha_grid": [0.001, 0.0025, 0.005, 0.01, 0.02, 0.04, 0.08],
+    "mechanism": "monotone attenuation only; the blend cannot raise any released-M20 event score",
+    "selection_unit": "one alpha selected independently inside each grouped fold using only its fit sources",
+    "fit_selection": "highest fit Score delta among positive alphas passing every fit hard gate; smallest alpha breaks exact ties",
+    "no_fit_candidate_action": "fail closed to alpha=0 for reporting and fail promotion"
+  },
+  "source_population": {
+    "names": [
+      "train_044.npz",
+      "train_045.npz",
+      "train_046.npz",
+      "train_047.npz",
+      "train_088.npz",
+      "train_089.npz",
+      "train_090.npz",
+      "train_091.npz",
+      "train_092.npz",
+      "train_093.npz",
+      "train_094.npz",
+      "train_095.npz",
+      "train_096.npz",
+      "train_097.npz",
+      "train_098.npz"
+    ],
+    "source_sha256": {
+      "train_044.npz": "e1634dcdd447f74292b04ed0aafd5f4cc7797509c5e9d67547afc6f85ad0b379",
+      "train_045.npz": "de620db3fbfcf436d32d3ee37a050308998bbc67b195d93cb5d8f51c01d9aa1d",
+      "train_046.npz": "12df9ff6a7c9729973dfa3dc6819342acb2d98461f809bcb1f7c9dfaec055924",
+      "train_047.npz": "638897c19b261ec5e1136dbde305643531815e0066d5923093af1b6bf96f924d",
+      "train_088.npz": "29d5bbc31d23b38a91d349896a530b2d416224db4b464b1ae45c355b94b1ec10",
+      "train_089.npz": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb",
+      "train_090.npz": "5de16df85ee466b7ee1d8ecbf465a8cbfe64d2029b7b7a895cc181ca75559102",
+      "train_091.npz": "7314cdd6627d9bf538656abc7e098b8fd21e79038591e5a941187844eb7aed7e",
+      "train_092.npz": "9b8707627ac1bbcd471bbff7fc9b02fafbe5c6dd0f54857dbb158fb8916eeca6",
+      "train_093.npz": "460e45e7bc5d3df8a1a1dbd8a19427c95d130937ec3e4912c2dda3f693456338",
+      "train_094.npz": "8c5f985c75abeac73cc87e3419deb461ba508fc16fe1411b98b4f70f15458eec",
+      "train_095.npz": "b86e9b764b3bd9e151d9657a4a0b5c3255e0296882c3b367131f31443bf2eeb3",
+      "train_096.npz": "7c136b7dbb8ad85ddc43c50ef2886c062ac9ab7e9927951ecc6c67e7ea397a7c",
+      "train_097.npz": "3583cd09272702cf1da8caf76f7b802856c41394555b0c990124c08515d16ac5",
+      "train_098.npz": "0a60a0dc6f80258ec428f97b30e2be683fd2d35391b0a76801ca4c8a3585ee13"
+    }
+  },
+  "fold_plan": [
+    {
+      "fold_id": "h1_holdout_044_045",
+      "domain": "h1",
+      "fit_names": ["train_046.npz", "train_047.npz"],
+      "held_names": ["train_044.npz", "train_045.npz"]
+    },
+    {
+      "fold_id": "h1_holdout_046_047",
+      "domain": "h1",
+      "fit_names": ["train_044.npz", "train_045.npz"],
+      "held_names": ["train_046.npz", "train_047.npz"]
+    },
+    {
+      "fold_id": "h2_holdout_088_091",
+      "domain": "h2",
+      "fit_names": ["train_092.npz", "train_093.npz", "train_094.npz", "train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"],
+      "held_names": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz"]
+    },
+    {
+      "fold_id": "h2_holdout_092_094",
+      "domain": "h2",
+      "fit_names": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz", "train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"],
+      "held_names": ["train_092.npz", "train_093.npz", "train_094.npz"]
+    },
+    {
+      "fold_id": "h2_holdout_095_098",
+      "domain": "h2",
+      "fit_names": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz", "train_092.npz", "train_093.npz", "train_094.npz"],
+      "held_names": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+    }
+  ],
+  "hard_gates": {
+    "fit_candidate": {
+      "score_delta": "> 0",
+      "pd_delta": ">= 0",
+      "iou_delta": ">= 0",
+      "fa_delta": "<= 0",
+      "true_positive_event_delta": "== 0",
+      "correct_target_group_delta": "== 0",
+      "false_alarm_evidence": "false_positive_event_delta <= -1 or false_component_delta <= -1"
+    },
+    "each_held_fold": {
+      "score_delta": ">= 0",
+      "pd_delta": ">= 0",
+      "iou_delta": ">= 0",
+      "fa_delta": "<= 0",
+      "true_positive_event_delta": "== 0",
+      "correct_target_group_delta": "== 0"
+    },
+    "pooled_oof_and_final_refit": {
+      "score_delta": ">= 0.0002",
+      "pd_delta": ">= 0",
+      "iou_delta": ">= 0",
+      "fa_delta": "<= 0",
+      "true_positive_event_delta": "== 0",
+      "correct_target_group_delta": "== 0",
+      "false_positive_event_delta": "<= -1",
+      "false_component_delta": "<= -1"
+    }
+  },
+  "promotion": {
+    "requires_positive_alpha_selected_in_every_fold": true,
+    "requires_every_held_fold_gate": true,
+    "requires_pooled_oof_gate": true,
+    "requires_deployable_all_train_refit_alpha": true,
+    "on_failure": "eliminate_confidence_score_blend_without_validation_attempt",
+    "on_pass": "eligible_for_separately_authorized_frozen_validation_once_only"
+  },
+  "code": {
+    "runner_sha256": "52bb5e11d25d188fbdf1ed62f198b5f850caaa5aff9132d69411d3678da71046",
+    "utils/temporal_memory_inference.py": "8b388094b1cf4504db5f823a5de6cc4d41793f69b1cf8822e16bb10eb59a9610",
+    "utils/temporal_memory_input_router.py": "965912a4886906b54bc95371fdce7aa19c5577c3b6f32925e5eb0bc34d5accb3",
+    "utils/postprocess.py": "a43e2a22947f5307cdb01b810a4f1dc8d4fb624b14bd068baf1e9087ca5d1aa4",
+    "utils/eval.py": "cb9de56b54a7153d80a2fd32432188665e830e0a9b945965f2cbd6765bb354e5",
+    "utils/challenge_eval.py": "a09e9a4b74abb06864e4551778addd624e53654041c98a41dbe61a1f67fbc952",
+    "model/temporal_memory_net.py": "d90c550bc2928482684c1216f52c4752700c27b79935a9552208bc2bca00f32f",
+    "model/temporal_frame_net.py": "af472b58a5c530bda818702f06e2072e36efd2ceaf55be66ec4d3ce65040f9ab",
+    "model/modules/confidence_head.py": "8c0412656aefd95e087779488480a7c333fd005e1b3bfffae821b4514e088356"
+  }
+}

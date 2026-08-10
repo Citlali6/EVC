@@ -11,6 +11,12 @@ from typing import Optional
 
 import numpy as np
 
+from utils.component_reranker import (
+    ComponentReranker,
+    ComponentRerankerConfig,
+    ComponentRerankerStats,
+)
+
 
 def _as_bool(value):
     if isinstance(value, str):
@@ -1135,9 +1141,10 @@ class P18ScoreTrackRecovery:
 
 @dataclass
 class ChallengePostprocessStats:
-    """Composite P0/P0b and optional P18 inference statistics."""
+    """Composite P0/P0b, learned reranker, and P18 statistics."""
 
     base_stats: object
+    reranker_stats: ComponentRerankerStats
     recovery_stats: P18ScoreTrackRecoveryStats
 
     def __getattr__(self, name):
@@ -1146,10 +1153,15 @@ class ChallengePostprocessStats:
 
     def merge(self, other):
         self.base_stats.merge(other.base_stats)
+        self.reranker_stats.merge(other.reranker_stats)
         self.recovery_stats.merge(other.recovery_stats)
 
     def summary(self):
         summary = self.base_stats.summary()
+        if self.reranker_stats.enabled:
+            summary += '; component reranker: {}'.format(
+                self.reranker_stats.summary()
+            )
         if self.recovery_stats.enabled:
             summary += '; P18 score-track recovery: {}'.format(
                 self.recovery_stats.summary()
@@ -1158,7 +1170,7 @@ class ChallengePostprocessStats:
 
 
 class ChallengePostprocessor:
-    """Apply P0/P0b followed by optional P18 score-track recovery.
+    """Apply P0/P0b, the optional reranker, then P18 recovery.
 
     P0 and P0b have overlapping purposes. Requiring one at a time keeps their
     validation result attributable to a single, reproducible configuration.
@@ -1166,8 +1178,18 @@ class ChallengePostprocessor:
     positives as track seeds but cannot reintroduce P0-suppressed seed noise.
     """
 
-    def __init__(self, postprocessor, score_track_recovery):
+    def __init__(
+        self,
+        postprocessor,
+        score_track_recovery,
+        component_reranker=None,
+    ):
         self._postprocessor = postprocessor
+        self._component_reranker = (
+            ComponentReranker(ComponentRerankerConfig())
+            if component_reranker is None
+            else component_reranker
+        )
         self._score_track_recovery = score_track_recovery
 
     @classmethod
@@ -1181,6 +1203,12 @@ class ChallengePostprocessor:
         score_track_recovery = P18ScoreTrackRecovery.from_cfg(
             cfg,
             prediction_threshold,
+        )
+        component_reranker = ComponentReranker.from_cfg(
+            cfg,
+            prediction_threshold,
+            event_count=event_count,
+            input_postprocess=p0_filter.config,
         )
         if (
             p0_filter.config.high_confidence_recovery_enabled
@@ -1201,6 +1229,11 @@ class ChallengePostprocessor:
             raise ValueError(
                 'P0 and P0b cannot be enabled together. Choose one postprocessor.'
             )
+        if component_reranker.enabled and not p0_filter.enabled:
+            raise ValueError(
+                'Component reranker requires POSTPROCESS.p0_enabled=true so its '
+                'input stage is P0/P0c output.'
+            )
         if score_track_recovery.enabled and not p0_filter.enabled:
             raise ValueError(
                 'P18 score-track recovery requires POSTPROCESS.p0_enabled=true.'
@@ -1208,11 +1241,16 @@ class ChallengePostprocessor:
         return cls(
             p0b_filter if p0b_filter.enabled else p0_filter,
             score_track_recovery,
+            component_reranker=component_reranker,
         )
 
     @property
     def enabled(self):
-        return self._postprocessor.enabled or self._score_track_recovery.enabled
+        return (
+            self._postprocessor.enabled
+            or self._component_reranker.enabled
+            or self._score_track_recovery.enabled
+        )
 
     @property
     def density_retain_enabled(self):
@@ -1221,14 +1259,23 @@ class ChallengePostprocessor:
             and self._postprocessor.config.density_retain_enabled
         )
 
+    @property
+    def component_reranker_enabled(self):
+        return self._component_reranker.enabled
+
     def new_stats(self):
         return ChallengePostprocessStats(
             self._postprocessor.new_stats(),
+            self._component_reranker.new_stats(),
             self._score_track_recovery.new_stats(),
         )
 
     def describe(self):
         description = self._postprocessor.describe()
+        if self._component_reranker.enabled:
+            description += '; component reranker: {}'.format(
+                self._component_reranker.describe()
+            )
         if self._score_track_recovery.enabled:
             description += '; P18 score-track recovery: {}'.format(
                 self._score_track_recovery.describe()
@@ -1237,8 +1284,16 @@ class ChallengePostprocessor:
 
     def apply(self, predictions, locations):
         predictions, base_stats = self._postprocessor.apply(predictions, locations)
+        predictions, reranker_stats = self._component_reranker.apply(
+            predictions,
+            locations,
+        )
         predictions, recovery_stats = self._score_track_recovery.apply(
             predictions,
             locations,
         )
-        return predictions, ChallengePostprocessStats(base_stats, recovery_stats)
+        return predictions, ChallengePostprocessStats(
+            base_stats,
+            reranker_stats,
+            recovery_stats,
+        )

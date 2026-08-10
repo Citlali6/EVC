@@ -18,13 +18,23 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import replay_temporal_memory_validation as replay
 from utils.challenge_eval import add_batch_to_evaluator, evaluate_challenge_metrics
+from utils.component_reranker import (
+    ARTIFACT_SCHEMA,
+    FEATURE_SEMANTICS_VERSION,
+    FEATURE_NAMES,
+    TRAIN_CACHE_SCHEMA,
+    ComponentTopology,
+    input_postprocess_mapping,
+    sha256_file,
+    sha256_json,
+)
 from utils.density_threshold import select_density_threshold
 from utils.eval import evalute
-from utils.postprocess import ChallengePostprocessor
+from utils.postprocess import ChallengePostprocessor, P0ClusterFilterConfig
 
 
-def make_cfg():
-    return SimpleNamespace(
+def make_cfg(**overrides):
+    options = dict(
         roc=True,
         pd_detT=50,
         correct_thresh=0.5,
@@ -51,7 +61,30 @@ def make_cfg():
         p18_min_track_bins=2,
         p18_restore_mode="best",
         p18_max_restore_events_per_component=0,
+        component_reranker_enabled=False,
+        component_reranker_event_count_cutoff=100000,
+        component_reranker_model_path="",
+        component_reranker_expected_sha256="",
+        temporal_memory_enabled=True,
+        temporal_memory_model_path="",
+        temporal_memory_sparse_weight=0.0,
+        temporal_memory_secondary_model_path="",
+        temporal_memory_secondary_max_event_count=30000,
+        temporal_memory_blend_model_path="",
+        temporal_memory_bin_size=50,
+        temporal_memory_context_bins=5,
+        temporal_memory_width=16,
+        temporal_memory_sequence_length=16,
+        temporal_memory_inference_batch_size=8,
+        temporal_memory_log_count_clip=4.0,
+        temporal_frame_enabled=False,
+        dense_expert_enabled=False,
+        ensemble_enabled=False,
+        whole_t=5000,
+        res=[346, 260],
     )
+    options.update(overrides)
+    return SimpleNamespace(**options)
 
 
 def make_record(file_name, scores):
@@ -131,6 +164,56 @@ def make_payload(
         },
         "records": records,
     }
+
+
+def make_reranker_fixture(directory):
+    directory = Path(directory)
+    checkpoint = directory / "m20.pt"
+    checkpoint.write_bytes(b"replay-bound-m20")
+    checkpoint_sha256 = sha256_file(checkpoint)
+    cfg = make_cfg(
+        component_reranker_enabled=True,
+        temporal_memory_model_path=str(checkpoint),
+    )
+    p0_config = P0ClusterFilterConfig.from_cfg(cfg, event_count=100001)
+    inference_settings = replay._inference_settings(cfg)
+    provenance = {
+        "dataset_split": "train",
+        "train_cache_schema": TRAIN_CACHE_SCHEMA,
+        "train_cache_manifest_sha256": "1" * 64,
+        "base_checkpoint_sha256": checkpoint_sha256,
+        "deployment_event_count_cutoff": 100000,
+        "input_postprocess": input_postprocess_mapping(p0_config),
+        "inference_settings": inference_settings,
+    }
+    provenance["input_postprocess_sha256"] = sha256_json(
+        provenance["input_postprocess"]
+    )
+    provenance["inference_settings_sha256"] = sha256_json(inference_settings)
+    artifact = directory / "reranker.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema": ARTIFACT_SCHEMA,
+                "feature_semantics_version": FEATURE_SEMANTICS_VERSION,
+                "feature_names": list(FEATURE_NAMES),
+                "feature_mean": [0.0] * len(FEATURE_NAMES),
+                "feature_scale": [1.0] * len(FEATURE_NAMES),
+                "coefficients": [0.0] * len(FEATURE_NAMES),
+                "intercept": 0.0,
+                "keep_probability": 0.5,
+                "prediction_threshold": 0.719,
+                "topology": ComponentTopology().to_dict(),
+                "provenance": provenance,
+            },
+            sort_keys=True,
+            allow_nan=False,
+        ),
+        encoding="utf-8",
+    )
+    cfg.component_reranker_model_path = str(artifact)
+    cfg.component_reranker_expected_sha256 = sha256_file(artifact)
+    return cfg, checkpoint_sha256
 
 
 def direct_test2_metrics(records, density_cutoff, low_threshold, high_threshold, cfg):
@@ -264,6 +347,77 @@ class CacheValidationAndRoutingTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "inference code"):
             replay.route_cache_records(primary, secondary, secondary_max_events=30)
+
+    def test_reranker_replay_binds_actual_primary_checkpoint_and_settings(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            cfg, checkpoint_sha256 = make_reranker_fixture(temporary_dir)
+            primary = make_payload([], checkpoint_sha=checkpoint_sha256)
+            binding = replay.validate_component_reranker_cache_binding(
+                cfg, primary, secondary_max_events=30000
+            )
+            self.assertEqual(
+                binding["primary_cache_checkpoint_sha256"], checkpoint_sha256
+            )
+            self.assertEqual(
+                binding["inference_settings_sha256"],
+                sha256_json(DEFAULT_INFERENCE_SETTINGS),
+            )
+
+            wrong_checkpoint = make_payload([], checkpoint_sha="b" * 64)
+            with self.assertRaisesRegex(ValueError, "Primary replay cache checkpoint"):
+                replay.validate_component_reranker_cache_binding(
+                    cfg, wrong_checkpoint, secondary_max_events=30000
+                )
+
+            changed_settings = dict(DEFAULT_INFERENCE_SETTINGS)
+            changed_settings["temporal_memory_log_count_clip"] = 3.5
+            wrong_settings = make_payload(
+                [],
+                checkpoint_sha=checkpoint_sha256,
+                inference_settings=changed_settings,
+            )
+            with self.assertRaisesRegex(ValueError, "Primary replay cache inference"):
+                replay.validate_component_reranker_cache_binding(
+                    cfg, wrong_settings, secondary_max_events=30000
+                )
+
+    def test_reranker_replay_rejects_secondary_above_cutoff_or_dense_route(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            cfg, checkpoint_sha256 = make_reranker_fixture(temporary_dir)
+            primary = make_payload([], checkpoint_sha=checkpoint_sha256)
+            with self.assertRaisesRegex(ValueError, "secondary routing"):
+                replay.validate_component_reranker_cache_binding(
+                    cfg, primary, secondary_max_events=100001
+                )
+
+            dense_secondary = replay.RoutedRecord(
+                file_name="val_023.npz",
+                event_count=100001,
+                scores=torch.tensor([0.9], dtype=torch.float32),
+                seg_label=torch.tensor([0.0], dtype=torch.float32),
+                locs=torch.tensor([[0, 1, 1, 1]], dtype=torch.int64),
+                idx_label=np.asarray([0], dtype=np.int64),
+                source_sha256="0" * 64,
+                score_source="secondary",
+            )
+            with self.assertRaisesRegex(ValueError, "must come from primary"):
+                replay.validate_component_reranker_dense_routes(
+                    cfg, [dense_secondary]
+                )
+
+    def test_disabled_reranker_does_not_open_artifact_during_replay(self):
+        cfg = make_cfg(
+            component_reranker_enabled=False,
+            component_reranker_model_path="Z:/missing.json",
+            component_reranker_expected_sha256="invalid",
+        )
+        self.assertIsNone(
+            replay.validate_component_reranker_cache_binding(
+                cfg,
+                make_payload([]),
+                secondary_max_events=100001,
+            )
+        )
 
 
 class ExactReplayTest(unittest.TestCase):

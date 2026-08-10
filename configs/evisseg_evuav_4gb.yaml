@@ -130,6 +130,11 @@ POSTPROCESS:
   p0c_density_retain_enabled: false
   p0c_density_event_count_cutoff: 100000
   p0c_density_retain_min_score: 0.97
+  # Train-only-fitted component reranker; inference is label-free and dense-only.
+  component_reranker_enabled: false
+  component_reranker_event_count_cutoff: 100000
+  component_reranker_model_path: ""
+  component_reranker_expected_sha256: ""
   # P0b: centroid-track alternative to P0; P0 and P0b are mutually exclusive.
   p0b_enabled: false
   p0b_spatial_radius: 1

@@ -92,6 +92,8 @@ if __name__ == "__main__":
     )
     if postprocessor.density_retain_enabled and cfg.batch_size != 1:
         raise ValueError('P0c density retain requires batch_size=1.')
+    if postprocessor.component_reranker_enabled and cfg.batch_size != 1:
+        raise ValueError('Component reranker requires batch_size=1 complete-video inference.')
     fine_detail_bin_ratio = 1
     if temporal_frame_config.fine_detail_enabled:
         if (

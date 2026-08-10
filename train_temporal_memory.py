@@ -51,6 +51,22 @@ ALLOWED_RESUME_CONFIG_DIFFERENCES = frozenset(
 LEGACY_RESUME_CONFIG_DEFAULTS = {
     (
         'POSTPROCESS',
+        'component_reranker_enabled',
+    ): False,
+    (
+        'POSTPROCESS',
+        'component_reranker_event_count_cutoff',
+    ): 100000,
+    (
+        'POSTPROCESS',
+        'component_reranker_model_path',
+    ): '',
+    (
+        'POSTPROCESS',
+        'component_reranker_expected_sha256',
+    ): '',
+    (
+        'POSTPROCESS',
         'p0c_density_retain_enabled',
     ): False,
     (

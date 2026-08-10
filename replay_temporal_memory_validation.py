@@ -43,6 +43,13 @@ from utils.challenge_eval import (
     add_batch_to_evaluator,
     evaluate_challenge_metrics,
 )
+from utils.component_reranker import (
+    FEATURE_SEMANTICS_VERSION,
+    load_artifact_payload,
+    sha256_json,
+    temporal_memory_inference_mapping,
+    validate_artifact_training_provenance,
+)
 from utils.density_threshold import ChallengeCountTotals, select_density_threshold
 from utils.eval import evalute
 from utils.postprocess import ChallengePostprocessor
@@ -81,6 +88,7 @@ REPLAY_CODE_PROVENANCE_PATHS = (
     "utils/density_threshold.py",
     "utils/eval.py",
     "utils/postprocess.py",
+    "utils/component_reranker.py",
 )
 # Backward-compatible name for callers that imported the original constant.
 CODE_PROVENANCE_PATHS = CACHE_CODE_PROVENANCE_PATHS
@@ -198,18 +206,7 @@ def decimal_grid(minimum: str, maximum: str, step: str) -> Tuple[float, ...]:
 
 
 def _inference_settings(cfg) -> dict:
-    return {
-        "temporal_memory_bin_size": int(cfg.temporal_memory_bin_size),
-        "temporal_memory_context_bins": int(cfg.temporal_memory_context_bins),
-        "temporal_memory_width": int(cfg.temporal_memory_width),
-        "temporal_memory_sequence_length": int(cfg.temporal_memory_sequence_length),
-        "temporal_memory_inference_batch_size": int(
-            cfg.temporal_memory_inference_batch_size
-        ),
-        "temporal_memory_log_count_clip": float(cfg.temporal_memory_log_count_clip),
-        "whole_t": int(cfg.whole_t),
-        "resolution": [int(cfg.res[0]), int(cfg.res[1])],
-    }
+    return temporal_memory_inference_mapping(cfg)
 
 
 def _code_provenance(
@@ -660,6 +657,157 @@ def route_cache_records(
     return routed
 
 
+def validate_component_reranker_cache_binding(
+    cfg,
+    primary_payload: Mapping,
+    secondary_payload: Optional[Mapping] = None,
+    secondary_max_events: int = 0,
+) -> Optional[dict]:
+    """Fail closed when replay scores are not the artifact's bound M20 scores.
+
+    Runtime inference validates the configured checkpoint on disk.  Replay has
+    an additional trust boundary: cached probabilities may have been produced
+    by a different checkpoint or inference configuration.  This guard binds
+    the *actual primary cache metadata* to the train-only artifact before any
+    labels are evaluated.
+    """
+    if not bool(getattr(cfg, "component_reranker_enabled", False)):
+        return None
+
+    validate_cache_payload(primary_payload, "primary cache")
+    if secondary_payload is not None:
+        validate_cache_payload(secondary_payload, "secondary cache")
+        _validate_cache_compatibility(primary_payload, secondary_payload)
+
+    artifact_path = str(getattr(cfg, "component_reranker_model_path", ""))
+    expected_artifact_sha256 = str(
+        getattr(cfg, "component_reranker_expected_sha256", "")
+    )
+    artifact, artifact_sha256 = load_artifact_payload(
+        artifact_path, expected_artifact_sha256
+    )
+    if artifact.get("feature_semantics_version") != FEATURE_SEMANTICS_VERSION:
+        raise ValueError(
+            "Component reranker feature semantics version does not match replay."
+        )
+    provenance = artifact.get("provenance")
+    provenance = validate_artifact_training_provenance(provenance)
+    base_checkpoint_sha256 = str(
+        provenance.get("base_checkpoint_sha256", "")
+    ).lower()
+    if len(base_checkpoint_sha256) != 64:
+        raise ValueError(
+            "Component reranker artifact has invalid base checkpoint provenance."
+        )
+    primary_checkpoint_sha256 = str(
+        primary_payload["metadata"].get("checkpoint_sha256", "")
+    ).lower()
+    if primary_checkpoint_sha256 != base_checkpoint_sha256:
+        raise ValueError(
+            "Primary replay cache checkpoint SHA-256 {} does not match component "
+            "reranker base {}.".format(
+                primary_checkpoint_sha256, base_checkpoint_sha256
+            )
+        )
+
+    configured_checkpoint_path = Path(
+        str(getattr(cfg, "temporal_memory_model_path", ""))
+    ).expanduser().resolve()
+    if not configured_checkpoint_path.is_file():
+        raise FileNotFoundError(
+            "Configured M20 checkpoint does not exist: {}".format(
+                configured_checkpoint_path
+            )
+        )
+    configured_checkpoint_sha256 = sha256_file(configured_checkpoint_path)
+    if configured_checkpoint_sha256 != base_checkpoint_sha256:
+        raise ValueError(
+            "Configured M20 checkpoint SHA-256 {} does not match component "
+            "reranker base {}.".format(
+                configured_checkpoint_sha256, base_checkpoint_sha256
+            )
+        )
+
+    artifact_inference_settings = provenance.get("inference_settings")
+    if not isinstance(artifact_inference_settings, Mapping):
+        raise ValueError(
+            "Component reranker artifact is missing inference_settings provenance."
+        )
+    artifact_inference_settings = dict(artifact_inference_settings)
+    inference_settings_sha256 = str(
+        provenance.get("inference_settings_sha256", "")
+    ).lower()
+    if inference_settings_sha256 != sha256_json(artifact_inference_settings):
+        raise ValueError(
+            "Component reranker artifact inference settings signature is invalid."
+        )
+    runtime_inference_settings = _inference_settings(cfg)
+    runtime_differences = _mapping_differences(
+        artifact_inference_settings, runtime_inference_settings
+    )
+    if runtime_differences:
+        raise ValueError(
+            "Runtime inference settings differ from component reranker artifact: {}."
+            .format(", ".join(runtime_differences))
+        )
+    primary_inference_settings = dict(
+        primary_payload["metadata"]["inference_settings"]
+    )
+    cache_differences = _mapping_differences(
+        artifact_inference_settings, primary_inference_settings
+    )
+    if cache_differences:
+        raise ValueError(
+            "Primary replay cache inference settings differ from component "
+            "reranker artifact: {}.".format(", ".join(cache_differences))
+        )
+
+    cutoff = int(getattr(cfg, "component_reranker_event_count_cutoff", 100000))
+    trained_cutoff = int(provenance.get("deployment_event_count_cutoff", -1))
+    if cutoff != trained_cutoff:
+        raise ValueError(
+            "Component reranker replay cutoff {} does not match artifact {}."
+            .format(cutoff, trained_cutoff)
+        )
+    secondary_max_events = int(secondary_max_events)
+    if secondary_max_events < 0 or secondary_max_events > cutoff:
+        raise ValueError(
+            "Replay secondary routing must stay entirely at or below component "
+            "reranker cutoff {}.".format(cutoff)
+        )
+
+    return {
+        "artifact_sha256": artifact_sha256,
+        "artifact_base_checkpoint_sha256": base_checkpoint_sha256,
+        "configured_checkpoint_sha256": configured_checkpoint_sha256,
+        "primary_cache_checkpoint_sha256": primary_checkpoint_sha256,
+        "inference_settings": artifact_inference_settings,
+        "inference_settings_sha256": inference_settings_sha256,
+        "event_count_cutoff": cutoff,
+        "secondary_max_events": secondary_max_events,
+    }
+
+
+def validate_component_reranker_dense_routes(
+    cfg,
+    records: Sequence[RoutedRecord],
+) -> None:
+    """Ensure every reranker-eligible cached video came from primary M20."""
+    if not bool(getattr(cfg, "component_reranker_enabled", False)):
+        return
+    cutoff = int(getattr(cfg, "component_reranker_event_count_cutoff", 100000))
+    invalid = [
+        record.file_name
+        for record in records
+        if int(record.event_count) > cutoff and record.score_source != "primary"
+    ]
+    if invalid:
+        raise ValueError(
+            "Component reranker-eligible replay records must come from primary "
+            "M20 cache; secondary routed: {}.".format(", ".join(invalid))
+        )
+
+
 def evaluate_cached_video(record: RoutedRecord, threshold: float, cfg) -> ChallengeCountTotals:
     """Return exact per-video sufficient counts after real project postprocessing."""
 
@@ -893,6 +1041,10 @@ def _postprocess_settings(cfg) -> dict:
         "p0c_density_retain_enabled",
         "p0c_density_event_count_cutoff",
         "p0c_density_retain_min_score",
+        "component_reranker_enabled",
+        "component_reranker_event_count_cutoff",
+        "component_reranker_model_path",
+        "component_reranker_expected_sha256",
         "p0b_enabled",
         "p0b_spatial_radius",
         "p0b_temporal_bin_size",
@@ -912,7 +1064,18 @@ def _postprocess_settings(cfg) -> dict:
         "p18_restore_mode",
         "p18_max_restore_events_per_component",
     )
-    return {name: getattr(cfg, name, None) for name in names}
+    settings = {name: getattr(cfg, name, None) for name in names}
+    artifact_path = str(
+        getattr(cfg, "component_reranker_model_path", "") or ""
+    ).strip()
+    settings["component_reranker_actual_sha256"] = (
+        sha256_file(Path(artifact_path).expanduser().resolve())
+        if bool(getattr(cfg, "component_reranker_enabled", False))
+        and artifact_path
+        and Path(artifact_path).expanduser().is_file()
+        else None
+    )
+    return settings
 
 
 def _evaluation_settings(cfg) -> dict:
@@ -1140,7 +1303,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         tuple(checkpoint_paths)
         + (("output-json", args.output_json), ("output-csv", args.output_csv))
     )
+    reranker_cache_binding = validate_component_reranker_cache_binding(
+        cfg,
+        primary,
+        secondary,
+        args.secondary_max_events,
+    )
     records = route_cache_records(primary, secondary, args.secondary_max_events)
+    validate_component_reranker_dense_routes(cfg, records)
     low_thresholds = decimal_grid(args.low_min, args.low_max, args.threshold_step)
     high_thresholds = decimal_grid(args.high_min, args.high_max, args.threshold_step)
     results = sweep_threshold_pairs(
@@ -1181,6 +1351,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "low_thresholds": list(low_thresholds),
         "high_thresholds": list(high_thresholds),
         "postprocess": _postprocess_settings(cfg),
+        "component_reranker_cache_binding": reranker_cache_binding,
         "evaluation": _evaluation_settings(cfg),
         "replay_code_sha256": _code_provenance(
             project_root, REPLAY_CODE_PROVENANCE_PATHS

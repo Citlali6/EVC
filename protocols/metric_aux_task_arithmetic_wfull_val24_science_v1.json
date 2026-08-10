@@ -1,0 +1,222 @@
+{
+  "schema": "ev-uav-metric-aux-task-arithmetic-wfull-val24-science-v1",
+  "created_utc": "2026-08-10T17:00:00Z",
+  "status": "frozen_before_any_wfull_val24_npz_cache_label_or_golden_report_access",
+  "candidate_id": "metric_aux_task_arithmetic_all11_alpha1_wfull_h2_full_t160",
+  "evidence_class": "single_sequence_adaptive_val24_replay_not_independent_held",
+  "sequence_disclosure": {
+    "candidate_selected_from_train_only_evidence": true,
+    "v5_grouped_h2_oof_passed_before_all11_refit": true,
+    "all11_refit_and_alpha1_synthesis_completed_before_this_validation_definition": true,
+    "this_replay_is_ordered_after_prior_validation_experiments": true,
+    "independent_held_or_unbiased_claim_allowed": false,
+    "validation_tuning_after_replay_allowed": false,
+    "required_wording": "W_full was selected and synthesized from train-only evidence, but this single validation replay is sequenced after prior validation experiments and cannot be described as independent held or unbiased evidence."
+  },
+  "attempt_budget": {
+    "full_val24_replays": 1,
+    "claim_required_before_any_validation_npz_cache_label_manifest_or_golden_report_read": true,
+    "claim_is_irreversible": true,
+    "failure_action": "archive_without_validation_retuning_threshold_search_route_change_or_second_attempt"
+  },
+  "split_access": {
+    "before_claim_allowed": [
+      "this science protocol and its frozen execution protocol",
+      "repository code",
+      "train-only v5 OOF protocol runner audit manifest and passed report",
+      "train-only all11 v2 protocol runner audit pair audit synthesis manifest and W_full checkpoint",
+      "published validation contract protocol containing only expected paths hashes and golden constants",
+      "M10 M20 and W_full checkpoint bytes for CPU or synthetic runtime compatibility checks",
+      "synthetic 0/1 polarity arrays and synthetic label-free temporal videos"
+    ],
+    "deferred_until_after_claim": [
+      "official validation manifest",
+      "24 validation NPZ files",
+      "M10 and M20 golden validation caches",
+      "golden validation report"
+    ],
+    "test_forbidden": true,
+    "gpu_allowed_only_after_explicit_root_authorization": true
+  },
+  "train_only_evidence": {
+    "v5_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/metric_aux_task_arithmetic_h2_grouped_oof_science_v1.json",
+      "sha256": "4586e1e20a501a4b5219c2d5953a6666c1fc0d4ac08da2a7b29d6cea70938266"
+    },
+    "v5_runner": {
+      "workspace_relative_path": "EVC-work/run_metric_aux_task_arithmetic_h2_grouped_oof.py",
+      "sha256": "26dc7b53402afa9681add0448ef9e87c5dc297c6361066512d241bfbe8142e86"
+    },
+    "v5_command_audit": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/command_audit.json",
+      "sha256": "4792962006d1ca1a08f9fa9409e23074acf177849454c7d8c5429227603fa265"
+    },
+    "v5_synthesis_manifest": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/synthesis/synthesis_manifest.json",
+      "sha256": "c87738e0d9e52945b2e95c05b06749898718482e3ddda65293540e175c701876"
+    },
+    "v5_grouped_oof_report": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/grouped_oof_report.json",
+      "sha256": "df4d8d6bf123e75ae1be7f9f53ef03442daf50f9683042fdfd0343356ce5110e",
+      "required_schema": "ev-uav-metric-aux-task-arithmetic-h2-grouped-oof-report-v1",
+      "required_status": "passed",
+      "required_passed": true,
+      "required_decision": "eligible_for_preregistered_all11_paired_fit_before_any_validation"
+    },
+    "all11_v2_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/metric_aux_task_arithmetic_all11_final_refit_science_v2.json",
+      "sha256": "e6493681b4265620966fb1a6ea400de69a3926ab71c9a0c493f82824922cbe92"
+    },
+    "all11_v2_runner": {
+      "workspace_relative_path": "EVC-work/run_metric_aux_task_arithmetic_all11_final_refit_v2.py",
+      "sha256": "c5703b194ee51985593a919c66c72c9ca9f48f02bf1d6820c4745fda2cf4b43a"
+    },
+    "all11_v2_command_audit": {
+      "workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/command_audit.json",
+      "sha256": "882954a4671d29bdbfff99ad12293ed6be12408e761ef45bfeb9cc4f88a4b821"
+    },
+    "all11_v2_pair_audit": {
+      "workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/pair_audit.json",
+      "sha256": "c3c53857a451f9f9df2ea9caa0df4f023fe4c78647009594b054a861c3f44c19",
+      "required_passed": true
+    },
+    "all11_v2_synthesis_manifest": {
+      "workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/synthesis/synthesis_manifest.json",
+      "sha256": "7c23283720b046760463d91a4e68137803bcb448425d5ed88961b72f2a23caa1",
+      "required_passed": true,
+      "required_alpha": 1.0,
+      "required_new_training_optimizer_steps": 0
+    },
+    "wfull_checkpoint": {
+      "workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/synthesis/metric_aux_task_arithmetic_all11_alpha1.pt",
+      "sha256": "614999c09f82ec1911620ee35dae3f1f6362cb92d59a82e2e539e9b2ad2432ee",
+      "role": "released_m20_plus_all11_metric_aux_e3_minus_all11_baseline_e3_float64_then_single_float32_cast_alpha1"
+    }
+  },
+  "published_validation_contract": {
+    "workspace_relative_path": "EVC-work/protocols/persistence_standalone_val24_sequence_science_v1.json",
+    "sha256": "54dcb6d9b8e535110113a05a31c66bf50af39919d82a6d4d63c676d5d491187f",
+    "purpose": "hash-only source of the frozen 24-file manifest entries deferred paths and golden constants; no validation payload is opened before claim"
+  },
+  "route_policy": {
+    "input_only": true,
+    "temporal_bin_count_required": 160,
+    "low": "event_count<=30000; reuse exact golden M10 score tensor at threshold 0.718",
+    "middle": "30000<event_count<=200000; reuse exact golden full-stream M20 score tensor at threshold 0.719",
+    "h1": "event_count>200000 and complete-video polarity minority fraction<0.20; reuse exact golden full-stream M20 score tensor at threshold 0.719",
+    "h2": "event_count>200000 and complete-video polarity minority fraction>=0.20; infer W_full full-stream T160 at threshold 0.719",
+    "polarity_minority_cutoff": 0.20,
+    "expected_h2_video_count": 1,
+    "expected_non_h2_video_count": 23,
+    "candidate_runtime_calls_equal_h2_count": true,
+    "non_h2_golden_tensor_same_object_storage_layout_and_bits": true,
+    "t32_allowed": false,
+    "persistence_allowed": false,
+    "threshold_search_allowed": false
+  },
+  "inference": {
+    "mode": "full_stream_t160",
+    "checkpoint": "wfull_checkpoint",
+    "device": "cuda:0",
+    "temporal_bin_size": 50,
+    "temporal_bin_count": 160,
+    "whole_t": 8000,
+    "context_bins": 5,
+    "network_width": 16,
+    "sequence_length": 16,
+    "resolution": [346, 260],
+    "inference_batch_size": 8,
+    "log_count_clip": 4.0,
+    "prediction_threshold": 0.719,
+    "window_length": null,
+    "stride": null,
+    "forbidden_apis": [
+      "predict_temporal_memory_scores_windowed",
+      "predict_persistence_component_keep_probabilities"
+    ]
+  },
+  "postprocess": {
+    "configuration": "golden C00 unchanged for all 24 videos",
+    "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "candidate_only_change": "raw H2 score tensor source",
+    "non_h2_candidate_result_must_equal_golden_per_video": true
+  },
+  "golden": {
+    "routing": "M10 for event_count<=30000; released full-stream M20 otherwise",
+    "counts": {
+      "true_positive_events": 63981,
+      "false_positive_events": 2396,
+      "positive_events": 65506,
+      "detected_target_frames": 4649,
+      "target_frames": 4762,
+      "false_components": 1584,
+      "frame_count": 3752
+    },
+    "metrics": {
+      "iou": 0.9422550201416016,
+      "acc": 0.9767196774482727,
+      "pd": 0.9762704745905082,
+      "fa": 0.00000469291729752432,
+      "score_fa": 0.9541549751552311,
+      "score": 0.9628776541559201
+    }
+  },
+  "promotion_gates": {
+    "safety_pass_includes_only": [
+      "golden_baseline_exact_match",
+      "aggregate_score_strictly_greater_than_golden",
+      "aggregate_pd_not_lower_than_golden",
+      "aggregate_iou_not_lower_than_golden",
+      "aggregate_fa_not_higher_than_golden",
+      "validation_h2_correct_objects_not_lower_than_golden_h2",
+      "validation_h2_pd_not_lower_than_golden_h2",
+      "population_invariants_equal",
+      "all_non_h2_golden_tensor_object_storage_layout_bits_and_counts_preserved",
+      "wfull_full_t160_calls_equal_h2_count",
+      "only_h2_calls_wfull",
+      "route_population_exactly_one_h2_and_23_non_h2",
+      "t32_not_read_or_combined",
+      "persistence_not_read_or_combined"
+    ],
+    "materiality_report_only": {
+      "aggregate_score_delta_at_least": 0.00005,
+      "included_in_safety_pass": false
+    },
+    "raw_true_positive_event_delta_report_only": true,
+    "all_safety_gates_required": true
+  },
+  "runtime_contract": {
+    "python_version": "3.9.25",
+    "numpy_version": "1.26.4",
+    "opencv_version": "4.8.1",
+    "opencv_build_sha256": "173c080cc486d36465d7dcbe73e6a921c4c55fb56ee67b0cc2dad09ddd43f4f4",
+    "torch_version": "2.5.1+cu121",
+    "platform": "Windows-10-10.0.26100-SP0",
+    "cuda_runtime": "12.1",
+    "cuda_device_name": "NVIDIA GeForce RTX 4060 Laptop GPU"
+  },
+  "preflight": {
+    "cpu_preflight_must_not_read_validation_npz_cache_label_manifest_or_golden_report": true,
+    "cpu_preflight_must_not_create_attempt_claim": true,
+    "synthetic_route_boundary_smoke_required": true,
+    "wfull_cpu_strict_load_required": true,
+    "cuda_must_remain_uninitialized": true,
+    "runtime_preflight_requires_explicit_root_authorization": true,
+    "formal_run_requires_explicit_root_authorization": true
+  },
+  "outputs": {
+    "workspace_relative_directory": "experiments/20260811_metric_aux_task_arithmetic_wfull_val24_v1",
+    "execution_protocol": "execution_protocol.json",
+    "cpu_preflight_receipt": "cpu_preflight_receipt.json",
+    "runtime_preflight_receipt": "runtime_preflight_receipt.json",
+    "attempt_claim": "validation_attempt_claim.json",
+    "h2_cache": "raw_wfull_full_t160_h2_only.pt",
+    "report": "frozen_validation_report.json"
+  },
+  "side_effect_limits": {
+    "default_submission_or_checkpoint_changed": false,
+    "submission_zip_created": false,
+    "platform_upload_allowed": false,
+    "t32_or_persistence_artifact_read_allowed": false
+  }
+}

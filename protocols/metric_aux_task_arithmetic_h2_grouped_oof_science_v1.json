@@ -1,0 +1,200 @@
+{
+  "schema": "ev-uav-temporal-memory-metric-aux-task-arithmetic-h2-grouped-oof-v1",
+  "created_utc": "2026-08-10T15:28:00Z",
+  "status": "frozen_after_v4_train_only_results_before_any_task_arithmetic_checkpoint_synthesis_or_inference",
+  "experiment_id": "metric_aux_task_arithmetic_alpha1_h2_grouped_oof_v1",
+  "evidence_class": "adaptive_train_only_mechanism_followup_not_independent_oof_or_fold_clean_model_generalization",
+  "adaptive_selection_disclosure": {
+    "v4_held_train_results_observed_before_candidate_definition": true,
+    "candidate_selected_because_metric_aux_improved_each_fold_vs_paired_baseline_but_shared_full_finetune_drift_harmed_g2_g3_vs_m20": true,
+    "same_three_train_source_groups_reused": true,
+    "new_results_must_not_be_called_independent_held_or_unbiased_oof": true,
+    "claim_scope": "adaptive_incremental_finetune_task_vector_transfer_under_shared_parent_exposure",
+    "shared_parent_pretraining_exposure": true
+  },
+  "v4_inheritance": {
+    "scientific_candidate_loss_training_and_three_source_group_definition_inherited": true,
+    "v4_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/metric_aux_h2_grouped_oof_science_v4.json",
+      "sha256": "589e7d35075e31ad5d85b946ce444adeb88b9ca35cb7c8772b385bc61cfc96b5"
+    },
+    "v4_runner": {
+      "workspace_relative_path": "EVC-work/run_metric_aux_h2_grouped_oof_v4.py",
+      "sha256": "463fc34024e668786ff502e799badba6919385b8e365f73dc1b15710f18fa32b"
+    },
+    "v4_tests": {
+      "workspace_relative_path": "EVC-work/tests/test_run_metric_aux_h2_grouped_oof_v4.py",
+      "sha256": "33f30fd67d6143a6650a7707ad8c3d6d31e1a2c6dd1adebdc743c2dce98a9f0f"
+    },
+    "v4_command_audit": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/command_audit.json",
+      "sha256": "cb53edcdaf39b0fbc8ee16f23710279d941a6a63c834824d36c260222839de12"
+    },
+    "v4_report": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/grouped_oof_report.json",
+      "sha256": "523cffd42854adc48efa4890f5e8beb8d3f8042d450f07829943471b06fbcf91"
+    }
+  },
+  "v4_evaluation_artifacts": {
+    "hold_g1_released_m20": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g1_released_m20/evaluation.json", "sha256": "eee7dba767f7bab788079d89bfbe11adbe986031e6e3e066d01c3a9622ce3d8b"},
+    "hold_g1_baseline": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g1_baseline/evaluation.json", "sha256": "c8d2928474531708d9b156a91100637e63fcc78315fd50fbcc8bcdff76060531"},
+    "hold_g1_metric_aux": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g1_metric_aux/evaluation.json", "sha256": "9286c23bd7e5cce58006eb928aa1421cd70db9f21f9276b00c5dd36072df065c"},
+    "hold_g2_released_m20": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g2_released_m20/evaluation.json", "sha256": "e8b007058f3c6247131429f24dd3d852882c205f31d1a246a134ba8a540766ae"},
+    "hold_g2_baseline": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g2_baseline/evaluation.json", "sha256": "71aba3588b76cd619bd52cf3c5934b5d9247a3e0d5b56dd16e5c383daa90e5c5"},
+    "hold_g2_metric_aux": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g2_metric_aux/evaluation.json", "sha256": "4e417a662ac410497a2e25238c11141e107a24b390821c492031e4b43a7ae114"},
+    "hold_g3_released_m20": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g3_released_m20/evaluation.json", "sha256": "f4a93593afad3f3e06fb692e8b8638979ab502cd33c7e71b5e9f90373a80af1a"},
+    "hold_g3_baseline": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g3_baseline/evaluation.json", "sha256": "2995c1433a2b22356895250042793f5bca69e099a22aef2db1875b0c90601653"},
+    "hold_g3_metric_aux": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g3_metric_aux/evaluation.json", "sha256": "85d06704a430d54599cea4abfbc6f5073f438559ba952ff6cfc3d020635afd98"}
+  },
+  "observed_v4_mechanism_evidence": {
+    "report_passed": false,
+    "promotion_failed_against_released_m20": true,
+    "metric_aux_vs_paired_baseline_pooled": {
+      "score_delta": 0.0005062585837782851,
+      "pd_delta": 0.0,
+      "fa_delta": -0.00000023172233784800181,
+      "iou_delta": 0.0007908940315246582,
+      "correct_objects_delta": 0,
+      "true_positive_events_delta": -8,
+      "false_positive_events_delta": -103,
+      "false_components_delta": -35
+    },
+    "paired_baseline_vs_released_m20_pooled": {
+      "score_delta": -0.00192166563162011,
+      "pd_delta": 0.000374251497006095,
+      "fa_delta": 0.00000105268147765231,
+      "iou_delta": -0.00247788429260254,
+      "correct_objects_delta": 1,
+      "true_positive_events_delta": 43,
+      "false_positive_events_delta": 349,
+      "false_components_delta": 159
+    },
+    "metric_aux_vs_paired_baseline_fold_score_deltas": {
+      "hold_g1": 0.000288233194413845,
+      "hold_g2": 0.0008981920557328271,
+      "hold_g3": 0.00017292905767207767
+    },
+    "metric_aux_vs_paired_baseline_video_summary": {
+      "score_improved_count": 9,
+      "video_count": 11,
+      "false_positive_events_not_increased_count": 11,
+      "pd_unchanged_count": 11,
+      "correct_objects_unchanged_count": 11
+    },
+    "mechanism_hypothesis": "Subtract the paired baseline endpoint from the paired metric-aux endpoint to cancel shared ordinary E3 fine-tune drift, then translate only that differential task vector back to released M20."
+  },
+  "input_checkpoint_contract": {
+    "released_m20": {
+      "workspace_relative_path": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+      "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849"
+    },
+    "fold_pairs": {
+      "hold_g1": {
+        "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_baseline/model/runs/20260810-220213_seed49_pid39964/epoch_003_seed49.pt", "sha256": "752172260f19ab4ef78b601f3ed62a6d5136db779f004e7b4cd7ba2c1ce2882a"},
+        "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_metric_aux/model/runs/20260810-220332_seed49_pid41824/epoch_003_seed49.pt", "sha256": "59fb7b0c92294b6225c4e575a4aa7fa0977761eb3a1b14cf676a5b79be117b12"}
+      },
+      "hold_g2": {
+        "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_baseline/model/runs/20260810-220450_seed49_pid50852/epoch_003_seed49.pt", "sha256": "258f1ad67ebd6c7108b186b8aad3dfc49d18368c110607468fad6a618fba0955"},
+        "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_metric_aux/model/runs/20260810-220617_seed49_pid47452/epoch_003_seed49.pt", "sha256": "14a8956e8e50d281ed6deb642cae27d3026130597ac4ea05c348e10523f81da3"}
+      },
+      "hold_g3": {
+        "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_baseline/model/runs/20260810-220746_seed49_pid47268/epoch_003_seed49.pt", "sha256": "fb767a29bb2c7fc32075a9d8ece2e5ff2c2ae2297da1e465c858ab81dccee19e"},
+        "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_metric_aux/model/runs/20260810-220902_seed49_pid40704/epoch_003_seed49.pt", "sha256": "6e59d216cc9ef3a8dfb49b0778cde9aa56d8b6bb4052f09fb6ba94aeabb72297"}
+      }
+    },
+    "model_state_dict_contract": {
+      "ordered_key_count": 89,
+      "element_count": 1924716,
+      "dtype_each": "torch.float32",
+      "name_shape_canonical_sha256": "3bbe7100b5be460eeeea5218cccfb27d9ed697e449d5a3abe1babf918023f05e",
+      "non_float_or_buffer_entries_allowed": false,
+      "parent_baseline_aux_order_shape_dtype_exactly_equal": true
+    }
+  },
+  "task_arithmetic_candidate": {
+    "candidate_count": 1,
+    "alpha": 1.0,
+    "parameter_grid_allowed": false,
+    "threshold_search_allowed": false,
+    "weight_search_allowed": false,
+    "per_fold_formula": "W_iso = W_released_m20 + alpha * (W_metric_aux_e3 - W_baseline_e3)",
+    "fold_specific_task_vector_uses_only_that_folds_fit_sources": true,
+    "cross_fold_task_vector_average_or_merge_allowed": false,
+    "arithmetic_order": "for each sorted key, compute float64(released_m20) + 1.0 * (float64(metric_aux_e3) - float64(baseline_e3)), then cast once to the released_m20 float32 dtype",
+    "all_output_values_must_be_finite": true,
+    "strict_model_load_required": true,
+    "alpha_zero_identity_unit_gate_required": true,
+    "alpha_one_formula_bitwise_recompute_gate_required": true,
+    "whole_checkpoint_subtraction_forbidden": true,
+    "optimizer_scheduler_rng_state_copy_forbidden": true,
+    "temporal_memory_metadata_source": "released_m20",
+    "output_kind": "inference_only_task_arithmetic_checkpoint",
+    "new_training_optimizer_steps": 0
+  },
+  "evaluation_contract": {
+    "dataset_split": "train",
+    "new_candidate_evaluation_count": 3,
+    "held_source_groups_and_order_inherited_exactly_from_v4": true,
+    "complete_full_stream_t160": true,
+    "prediction_threshold": 0.719,
+    "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "all_v4_fixed_config_overrides_inherited_exact": true,
+    "released_m20_anchor_reinference_allowed": false,
+    "released_m20_anchor_counts_reused_from_bound_v4_artifacts": true,
+    "baseline_or_metric_aux_endpoint_reinference_allowed": false,
+    "t32_read_or_combined": false
+  },
+  "promotion_policy_revision": {
+    "timing": "fixed_after_observing_v4_and_before_any_task_arithmetic_checkpoint_synthesis_or_result",
+    "reason": "Promotion is aligned to the official competition objective and object-level detection quality. Raw true-positive event count is retained as a disclosed diagnostic but is not an official metric and is no longer a hard gate.",
+    "adaptive_policy_revision_disclosed": true,
+    "per_fold_against_released_m20": {
+      "score_not_lower": true,
+      "pd_not_lower": true,
+      "iou_not_lower": true,
+      "fa_not_higher": true,
+      "correct_objects_not_lower": true,
+      "population_invariants_equal": true,
+      "raw_true_positive_events_not_lower_required": false
+    },
+    "pooled_against_released_m20": {
+      "score_not_lower": true,
+      "score_delta_at_least": 0.0002,
+      "pd_not_lower": true,
+      "iou_not_lower": true,
+      "fa_not_higher": true,
+      "correct_objects_not_lower": true,
+      "population_invariants_equal": true,
+      "false_positive_events_or_false_components_at_least_one_strictly_lower": true,
+      "raw_true_positive_events_not_lower_required": false
+    },
+    "raw_true_positive_events_delta_must_be_reported": true,
+    "failure_action": "archive_without_alpha_threshold_c00_or_weight_search_on_these_adaptive_train_folds"
+  },
+  "synthesis_output_contract": {
+    "workspace_relative_directory": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1",
+    "per_fold_checkpoint_relative_template": "synthesis/{fold_id}/isolated_metric_aux_alpha1.pt",
+    "manifest_relative_path": "synthesis/synthesis_manifest.json",
+    "held_evaluation_relative_directory": "held_train_evaluation",
+    "report_relative_path": "grouped_oof_report.json",
+    "command_audit_relative_path": "command_audit.json",
+    "no_clobber": true,
+    "v1_v2_v3_v4_outputs_read_only": true
+  },
+  "deployment_limitation": {
+    "three_fold_checkpoints_are_evaluation_only_and_not_one_deployable_model": true,
+    "if_adaptive_gates_pass_a_separate_preregistered_all11_paired_fit_and_single_task_arithmetic_checkpoint_is_required": true,
+    "default_submission_change_allowed": false,
+    "validation_protocol_allowed_before_adaptive_train_gate_pass": false
+  },
+  "cli_contract": {
+    "allowed_commands": ["audit", "synthesize", "evaluate", "report", "all-evaluate-report"],
+    "train_command_exposed": false,
+    "probe_command_exposed": false,
+    "gpu_authorization_required_for_evaluate": true
+  },
+  "validation_or_test_read_allowed": false,
+  "t32_allowed": false,
+  "prior_persistence_formal_artifact_read_allowed": false,
+  "platform_submission_allowed": false
+}

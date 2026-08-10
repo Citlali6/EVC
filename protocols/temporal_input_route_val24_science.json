@@ -1,0 +1,208 @@
+{
+  "schema": "ev-uav-temporal-input-route-val24-science-protocol-v1",
+  "status": "frozen_before_any_new_val24_access",
+  "candidate_id": "m10_m20_polarity_h2_t32_stride16_c00_no_persistence",
+  "attempt_budget": 1,
+  "validation_dataset": {
+    "split": "val",
+    "video_count": 24,
+    "event_count": 1424330,
+    "canonical_stems": [
+      "val_000", "val_001", "val_002", "val_003", "val_004", "val_005",
+      "val_006", "val_007", "val_008", "val_009", "val_010", "val_011",
+      "val_012", "val_013", "val_014", "val_015", "val_016", "val_017",
+      "val_018", "val_019", "val_020", "val_021", "val_022", "val_023"
+    ],
+    "dataset_signature": "bedba93c1d523f58c35da6399219df1b98e6240f92d093520fa0f4961d927274",
+    "official_manifest_sha256": "c7c574b5dfa8336fe50917581544b5e4991b2cde197f31c9a5bee05a29e336d4",
+    "semantic_sha256": "d780da17e69446b988b1b5fae7954855d5ce66a32aa7b9581eeb3e4a0563f83f",
+    "manifest_evidence_source": {
+      "path_role": "prior_t32_execution_protocol",
+      "sha256": "8523a411e35bcfb0d0c78cbffd8a98a7983d4eeedd7f09d8a7b10e8a6200477d",
+      "member": "validation_dataset.manifest_files",
+      "new_dataset_read_required_to_freeze": false
+    },
+    "manifest_files": [
+      {"path": "val/val_000.npz", "size": 672778, "sha256": "a1e4ba6356e2fd792b639afbb86f2d3689bc31ff7442c7588c84b6c63afa606a"},
+      {"path": "val/val_001.npz", "size": 781877, "sha256": "d96a9e72d28b7c345cc8dd8e60f5736cbba71d8801d363f1b8d466cc89dfdd94"},
+      {"path": "val/val_002.npz", "size": 796833, "sha256": "6b5a19c42a36d845433362d4dbb15c4f4b5be7e2f28689497d488d2e227bdeda"},
+      {"path": "val/val_003.npz", "size": 801955, "sha256": "c46c422ebd1dae3ff9ab3ea033693a75685c7f75c04081484ca88bf0d9c5b1bc"},
+      {"path": "val/val_004.npz", "size": 397793, "sha256": "0d5c8422db2446f9cd277189e668c316d63e8d7460deb465a032781f5e5ee8b8"},
+      {"path": "val/val_005.npz", "size": 375891, "sha256": "8780f151e6c19384298215d6fff0ab4669543684694f9fa2bc8a0dd886544e3c"},
+      {"path": "val/val_006.npz", "size": 347122, "sha256": "24eaf86210425fbe975636c7ae76dbf089f6b380d33feb8d64c312bdd675ae4d"},
+      {"path": "val/val_007.npz", "size": 361269, "sha256": "a9a47e4c3add40594624a7eccb2961d9f0800fa28fad5613abfff2ab3b764288"},
+      {"path": "val/val_008.npz", "size": 1107726, "sha256": "d867fbf15ffbec65c8d956d12a8c94ae04a058f9d43a95a57bda0d0ff5b3c340"},
+      {"path": "val/val_009.npz", "size": 915209, "sha256": "c45f34bd163753a2b33a66b888c333992acfc02e479e970b82b05da949ac9644"},
+      {"path": "val/val_010.npz", "size": 714740, "sha256": "68fe4b367bd726cf13d565efce71626d16c82a1d5e23a04b2a7e15ec53747136"},
+      {"path": "val/val_011.npz", "size": 721822, "sha256": "00a64898fff553eb7fae2da5a5348d0ce092106e6b7ab9ef0c15df04efa79138"},
+      {"path": "val/val_012.npz", "size": 657518, "sha256": "783d1a9e7cec10ae7824ced690a48c7e6d610831b76e16de0bde5be36140911e"},
+      {"path": "val/val_013.npz", "size": 375692, "sha256": "7dc85445cb3556514c5173a5e44fad2db294f7b2a27700d71ae82b9b614aecb6"},
+      {"path": "val/val_014.npz", "size": 634373, "sha256": "56ce726ef985c529196d8de56abe3c4e8c856c0fa32233e1a233a74e1e8a730b"},
+      {"path": "val/val_015.npz", "size": 3296277, "sha256": "613d14b34aa6daca847be7a5abec2839f38c3ca15493dd4b82de57aae12f6179"},
+      {"path": "val/val_016.npz", "size": 343177, "sha256": "e1bde9a0a9a646650e396f7d370fd63b6e50645d20a50f37b5134bf5a0f3670e"},
+      {"path": "val/val_017.npz", "size": 339459, "sha256": "ea2931dfd62ed4d7f08147cb4e85cca806f55043fd060ea320a2508be6e6c7b6"},
+      {"path": "val/val_018.npz", "size": 331261, "sha256": "093486f51d7bd8792ed0bd4ff8da1897e2f17e318bc4aa82d09a87e703e6dba7"},
+      {"path": "val/val_019.npz", "size": 497103, "sha256": "0b74daccc45e61ce0f3245f5431d09255e17e6871336249097e9b5639949fb9d"},
+      {"path": "val/val_020.npz", "size": 509501, "sha256": "104cbc0e58c4f138e4a5dbadb531d34f48cd7f30ddbd4075e20697f6666d6b06"},
+      {"path": "val/val_021.npz", "size": 290928, "sha256": "72bcea68de3a6a5af5017d7953084463028cf64c448145f5522eac61c05bfac5"},
+      {"path": "val/val_022.npz", "size": 150787, "sha256": "5009601522900135b4fd228cc82850e2831d3150348297803d3e407bccddea5d"},
+      {"path": "val/val_023.npz", "size": 6077299, "sha256": "7fb44d523bb3b5df67a5356ee0314458b1d2a34a1221d631c4783c5e25097dbd"}
+    ]
+  },
+  "inputs": {
+    "m10_checkpoint": {"path_role": "released_m10_checkpoint", "sha256": "5c89c89a165469c0a4e8286d4644d60d2f82cf5775edbb724f626e24e67d8935"},
+    "m20_checkpoint": {"path_role": "released_m20_checkpoint", "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849"},
+    "m10_golden_cache": {"path_role": "released_m10_val24_raw_cache", "sha256": "96a9dfa8833e6f609d29f4db9d8f7196c84c7e92c7026cce734b97ddf133622f"},
+    "m20_golden_cache": {"path_role": "released_m20_val24_raw_cache", "sha256": "6c9b4a8e33217aac7a05c78590a7feb6db6e6fc332b6411d7603264687710304"},
+    "golden_report": {"path_role": "released_m20_c00_report", "sha256": "da6004ddd22731b8e848c9ed0c561961abbc04b4e3f66cd07b1e085d26f9f383"},
+    "train_v3_cache_manifest": {"path_role": "formal_99_train_route_cache_manifest_v3", "sha256": "78ca63efd1fd8fda62dcccb1203f0e69000007454a391b7d46455f9952cf2dc7"},
+    "train_v3_evaluation": {"path_role": "formal_99_train_route_evaluation_v3", "sha256": "4e3610a057c9c330b18f9d0712d57fe80a1463bc4ae567f64172986409d6e956"},
+    "train_v3_protocol": {"path_role": "frozen_99_train_route_protocol_v3", "sha256": "ddd027961bc36f2756a62cd62914c5be3400a2ddd965d53ab2ff066b331f36d1"}
+  },
+  "train_prerequisite": {
+    "split": "train",
+    "complete_source_count": 99,
+    "validation_or_test_read": false,
+    "route_uses_labels_or_source_name": false,
+    "route_policy_sha256": "f7835bc89d2ad4c3d29b46acc23f237bafd89e05cc1d983208fddf492480a836",
+    "route_counts": {"non_h2": 88, "h2": 11},
+    "identity_requirement": "all 88 non-H2 candidate score vectors bitwise equal baseline",
+    "change_requirement": "all 11 H2 candidate score vectors differ from baseline",
+    "pooled_delta": {
+      "iou": 0.014221429824829102,
+      "acc": 0.0013789534568786621,
+      "pd": 0.00014801657785668,
+      "fa": -8.313546995842769e-07,
+      "score_fa": 0.007428358228430798,
+      "score": 0.005269895410325631
+    },
+    "required_gates": {
+      "score_delta_strictly_positive": true,
+      "pd_delta_nondecreasing": true,
+      "iou_delta_nondecreasing": true,
+      "fa_delta_nonincreasing": true,
+      "non_h2_identity_complete": true,
+      "h2_changed_complete": true,
+      "all_required": true
+    },
+    "provenance_limitation": {
+      "severity": "P2",
+      "retroactive_full_train_to_val_code_equivalence_provable": false,
+      "unrecorded_transitive_files": [
+        "dataset/temporal_frame.py",
+        "model/modules/confidence_head.py",
+        "model/temporal_frame_net.py",
+        "model/temporal_memory_net.py",
+        "utils/multiscale_motion.py",
+        "utils/density_threshold.py",
+        "utils/component_reranker.py"
+      ],
+      "mitigation": "formal val freezes a clean git HEAD and expanded current runtime code hashes; train-v3 is not rerun or retroactively altered"
+    }
+  },
+  "route_policy": {
+    "sha256": "f7835bc89d2ad4c3d29b46acc23f237bafd89e05cc1d983208fddf492480a836",
+    "definition": {
+      "schema": "ev-uav-m20-polarity-temporal-route-v1",
+      "observable": "complete-video event polarity minority fraction",
+      "observable_definition": "min(mean(polarity > 0.5), 1 - mean(polarity > 0.5))",
+      "observable_event_scope": "all input events exactly once",
+      "low_density": {"condition": "event_count <= 30000", "checkpoint_role": "m10", "mode": "full_stream", "temporal_length": 160},
+      "middle_density": {"condition": "30000 < event_count <= 200000", "checkpoint_role": "m20", "mode": "full_stream", "temporal_length": 160},
+      "high_density": {"condition": "event_count > 200000", "checkpoint_role": "m20", "secondary_observable": "polarity minority fraction"},
+      "low_density_max_event_count": 30000,
+      "high_density_min_event_count_exclusive": 200000,
+      "cutoff": 0.2,
+      "cutoff_operator": "<",
+      "h1": {"mode": "full_stream", "temporal_length": 160},
+      "h2": {"mode": "window_t32_stride16", "window_length": 32, "stride": 16, "stitch": "nearest_window_center_ties_to_earlier_window"},
+      "expected_temporal_bin_count": 160,
+      "prediction_threshold": 0.719,
+      "prediction_threshold_by_checkpoint": {"m10": 0.718, "m20": 0.719},
+      "postprocess_profile": "released_M20_C00_fixed",
+      "labels_used_for_route": false,
+      "source_name_used_for_route": false,
+      "persistent_pixel_second_stage": {"enabled": false, "status": "disabled_pending_routed_train_oof_interaction"}
+    }
+  },
+  "inference": {
+    "whole_t": 8000,
+    "temporal_bin_size": 50,
+    "temporal_bin_count": 160,
+    "context_bins": 5,
+    "model_width": 16,
+    "resolution": [346, 260],
+    "inference_batch_size": 8,
+    "log_count_clip": 4.0,
+    "h2_window_length": 32,
+    "h2_stride": 16,
+    "device": "cuda:0"
+  },
+  "runtime_preflight": {
+    "required_before_attempt_claim": true,
+    "synthetic_only": true,
+    "validation_or_cache_read": false,
+    "expected_environment": {
+      "python_version": "3.9.25",
+      "torch_version": "2.5.1+cu121",
+      "numpy_version": "1.26.4",
+      "platform": "Windows-10-10.0.26100-SP0",
+      "cuda_runtime": "12.1",
+      "cuda_device_name": "NVIDIA GeForce RTX 4060 Laptop GPU"
+    }
+  },
+  "thresholds": {"low_event_count_max": 30000, "low": 0.718, "otherwise": 0.719},
+  "postprocess": {
+    "profile": "C00",
+    "settings": {
+      "pd_detT": 50,
+      "p0_enabled": true,
+      "p0_spatial_radius": 2,
+      "p0_temporal_bin_size": 50,
+      "p0_temporal_radius_bins": 1,
+      "p0_min_cluster_events": 3,
+      "p0_min_duration_bins": 5,
+      "p0c_high_confidence_recovery_enabled": true,
+      "p0c_retain_min_score": 0.95,
+      "p0c_density_retain_enabled": false,
+      "p0b_enabled": false,
+      "p18_score_track_recovery_enabled": true,
+      "p18_event_count_cutoff": 1,
+      "p18_max_event_count": 35000,
+      "p18_candidate_floor": 0.53,
+      "p18_spatial_radius": 5,
+      "p18_temporal_bin_size": 50,
+      "p18_max_link_distance": 8.0,
+      "p18_max_gap_bins": 1,
+      "p18_min_track_bins": 4,
+      "p18_restore_mode": "best",
+      "p18_max_restore_events_per_component": 0,
+      "component_reranker_enabled": false
+    }
+  },
+  "persistence": {"enabled": false, "reason": "not_composed_without_routed_train_oof_interaction_evidence"},
+  "cache_reuse": {
+    "baseline": "<=30000 exact M10 cache tensor; >30000 exact M20 cache tensor",
+    "candidate_non_h2": "same frozen cache underlying storage as baseline; bitwise preservation required",
+    "candidate_h2": "only H2 videos may run released M20 with T32 stride16",
+    "full_stream_reinference_allowed": false,
+    "h1_reinference_allowed": false,
+    "low_or_middle_reinference_allowed": false
+  },
+  "golden": {
+    "counts": {"true_positive_events": 63981, "false_positive_events": 2396, "positive_events": 65506, "detected_target_frames": 4649, "target_frames": 4762, "false_components": 1584, "frame_count": 3752},
+    "metrics": {"iou": 0.9422550201416016, "acc": 0.9767196774482727, "pd": 0.9762704745905082, "fa": 4.69291729752432e-06, "score_fa": 0.9541549751552311, "score": 0.9628776541559201}
+  },
+  "promotion_gates": {
+    "golden_baseline_exact_match": true,
+    "candidate_score_strictly_greater_than_golden_plus": 0.0001,
+    "candidate_pd_not_lower_than_golden": true,
+    "candidate_iou_not_lower_than_golden": true,
+    "candidate_fa_not_higher_than_golden": true,
+    "all_non_h2_scores_bitwise_preserved": true,
+    "h2_only_reinference": true,
+    "all_gates_required": true,
+    "failure_action": "archive_without_validation_retuning_or_second_attempt"
+  },
+  "side_effect_limits": {"submission_zip": false, "platform_upload": false, "threshold_search": false}
+}

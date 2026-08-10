@@ -2,9 +2,13 @@
 
 ## Status
 
-This document freezes the experiment before any cross-fit result is produced.
-The experiment uses only the official `train` split and an immutable M20
-train-cache.  Validation labels, validation metrics, leaderboard results,
+This document defines two explicitly named experiment profiles.  The original
+`conservative_v1` profile was frozen before its cross-fit result was produced.
+The later `posthoc_pw4_kp040_v2` profile is deliberately and permanently
+marked retrospective: it was frozen only after the v1 train-only no-op report
+and a train-only threshold diagnostic.  It is not presented as independent or
+unbiased OOF evidence.  Both profiles use only the official `train` split and
+an immutable M20 train-cache.  Validation labels, leaderboard results,
 file-name identity, target ID, and labels are never runtime features.  A model
 artifact is emitted only when every gate below passes.
 
@@ -37,7 +41,7 @@ protocol-file SHA-256 on its command line and rejects any mismatch.
   Middle videos still run through the complete frozen C00 postprocessor,
   including P18 for videos in its 30k--35k routing range.
 
-## Frozen model candidates
+## Frozen model candidates: `conservative_v1`
 
 Exactly eight candidates are preregistered:
 
@@ -57,9 +61,54 @@ receives equal mass.  Positive component weights are multiplied only after
 the base weights are assigned.  Block and source identity are used only for
 fold membership and sample weighting and are never model features.
 
-The winner for each fold is the candidate with the highest held-block Score;
-candidate ID is the deterministic tie-breaker.  No validation result can
-alter the candidate set, topology, weighting, winner rule, or gates.
+For `conservative_v1`, the winner for each fold is the candidate with the
+highest held-block Score; candidate ID is the deterministic tie-breaker.  No
+validation result can alter the candidate set, topology, weighting, winner
+rule, or gates.
+
+## Retrospective singleton: `posthoc_pw4_kp040_v2`
+
+The first v1 run produced eight exact no-ops and no artifact.  Its immutable
+report is
+`experiments/20260810_component_reranker_crosssource_v1/crossfit_report.json`
+with SHA-256
+`e06182a03667e169b16fee7b02e7e44dd636457bc2b4d6f62265dcb6300577d0`.
+The post-hoc train-only diagnostic that generated the follow-up hypothesis is
+`experiments/20260810_component_reranker_crosssource_v1/posthoc_threshold_diagnostic.json`
+with SHA-256
+`5ba11e24c8f820773b9baf2c1b778131cdf30876dffbc64b4f2d4c06b17ef8e3`.
+The tool requires both exact files and validates the diagnostic schema
+`ev-uav-component-reranker-posthoc-train-diagnostic-v1`, evidence class
+`retrospective_train_only_not_independent_oof`, source protocol/report/cache
+SHA-256 lineage, and the v1 all-candidate no-op outcome.
+
+V2 contains exactly one candidate and therefore performs no new
+hyperparameter selection:
+
+- candidate ID `pw04_kp400`;
+- positive component weight `4.0`;
+- keep probability `0.40`;
+- L2 penalty `0.1`;
+- the same feature semantics, topology, folds, fitting weights, C00 path, and
+  promotion gates as v1.
+
+The hypothesis origin is frozen as
+`retrospective_train_only_after_v1_noop`.  H1 and H2 are reused only as
+cross-source consistency gates.  Because those same held train blocks were
+inspected to create the `0.40` hypothesis, the v2 result must never be called
+an independent confirmation or unbiased OOF estimate.  In particular, v2
+must not scan `0.39`, `0.41`, or any other threshold.
+
+Before any v2 artifact or validation replay, the validation decision rule was
+separately frozen at
+`experiments/20260810_component_reranker_posthoc_singleton_v2/validation_acceptance_policy.json`
+with SHA-256
+`8f26a10b8585e31a2bef26177a2bc6390292549f66ce4e0b39f6c51eecf9d987`.
+The protocol records this path and digest.  If the train-only gates pass, at
+most one complete 24-video validation replay is allowed.  No validation-based
+threshold or hyperparameter search is allowed.  If that single replay fails
+the already-frozen acceptance policy, this component-suppression branch is
+archived without tuning it on validation.
 
 ## Frozen C00 and scoring path
 
@@ -113,10 +162,12 @@ All of the following must pass:
 8. The independently selected H1 and H2 winner candidate IDs are identical.
 
 If any gate fails, the run writes an audit report but no deployable model.  If
-all gates pass, the common winning candidate is refit once on all 54 videos
-with the same domain/video/component weighting.  The strict JSON artifact is
-compatible with the existing default-off runtime and records the OOF report,
-protocol, cache, document, and code SHA-256 provenance.
+all gates pass, the common v1 winner or the sole v2 candidate is refit once on
+all 54 videos with the same domain/video/component weighting.  The strict
+JSON artifact is compatible with the existing default-off runtime and records
+the train-only consistency report, protocol, cache, document, and code
+SHA-256 provenance.  A v2 artifact additionally records its retrospective,
+non-independent hypothesis report, diagnostic, and validation-policy lineage.
 NumPy, PyTorch, and OpenCV versions are frozen into the protocol and artifact.
 For a passing run, the artifact and report are fully serialized and staged
 before either final path is published; if the second publish fails, the first
@@ -127,3 +178,27 @@ is removed so no unaudited orphan model remains.
 `preregister` is run and its printed protocol-file SHA-256 is recorded before
 `run` is allowed.  `run` requires that SHA-256 explicitly.  Neither command
 accepts a validation-data path, and neither command performs GPU inference.
+
+`--candidate-profile` defaults to `conservative_v1`, which retains the exact
+eight-candidate v1 behavior.  V2 must be requested explicitly and must supply
+both frozen hypothesis sources and their exact digests:
+
+```powershell
+python crossfit_component_reranker.py preregister `
+  --candidate-profile posthoc_pw4_kp040_v2 `
+  --hypothesis-source-report "F:\小目标检测\experiments\20260810_component_reranker_crosssource_v1\crossfit_report.json" `
+  --expected-hypothesis-source-report-sha256 e06182a03667e169b16fee7b02e7e44dd636457bc2b4d6f62265dcb6300577d0 `
+  --hypothesis-source-diagnostic "F:\小目标检测\experiments\20260810_component_reranker_crosssource_v1\posthoc_threshold_diagnostic.json" `
+  --expected-hypothesis-source-diagnostic-sha256 5ba11e24c8f820773b9baf2c1b778131cdf30876dffbc64b4f2d4c06b17ef8e3 `
+  --cache-dir <immutable-train-cache> `
+  --config configs/evisseg_evuav.yaml `
+  --expected-selected-videos 54 `
+  --output-protocol <new-v2-protocol.json> `
+  <the exact frozen C00 --override arguments>
+```
+
+The preregistered protocol embeds these source paths and hashes, the fixed
+validation-policy path and hash, and all shared cache/config/code/document
+lineage.  `run` rebuilds and revalidates that entire definition before and
+after fitting.  It does not accept a replacement diagnostic, report, profile,
+or candidate from the command line.

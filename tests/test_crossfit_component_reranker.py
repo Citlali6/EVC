@@ -223,6 +223,159 @@ def make_fold_result(fold_id, candidate_id, baseline_counts, selected_counts):
     }
 
 
+def make_synthetic_posthoc_sources(root):
+    cache_dir = root / "cache"
+    cache_dir.mkdir()
+    manifest_path = cache_dir / "manifest.json"
+    crossfit._atomic_json(manifest_path, {"synthetic": True})
+    manifest_sha256 = sha256_file(manifest_path)
+    common = {
+        "dataset": {"cache_manifest_sha256": manifest_sha256},
+        "blocks": {"h1": ["a"], "h2": ["b"], "middle": ["c"]},
+        "fold_plan": [dict(item) for item in crossfit.FOLD_PLAN],
+        "topology": crossfit.TOPOLOGY.to_dict(),
+        "fit": {"algorithm": "synthetic"},
+        "scoring": {"prediction_threshold": 0.719},
+        "gates": {"pooled_score_delta_minimum": 0.0002},
+        "promotion": {"deployment_event_count_cutoff": 100000},
+        "config": {"sha256": "1" * 64, "overrides": c00_overrides()},
+    }
+    current_definition = {
+        **copy.deepcopy(common),
+        "candidate_profile": crossfit.POSTHOC_V2_PROFILE,
+        "candidates": crossfit.candidate_definitions(crossfit.POSTHOC_V2_PROFILE),
+        "oof": crossfit._oof_definition(crossfit.POSTHOC_V2_PROFILE),
+    }
+    source_definition = {
+        **copy.deepcopy(common),
+        "candidates": crossfit.candidate_definitions(
+            crossfit.CONSERVATIVE_V1_PROFILE
+        ),
+        "oof": crossfit._oof_definition(crossfit.CONSERVATIVE_V1_PROFILE),
+    }
+    source_protocol = {
+        "schema": crossfit.PROTOCOL_SCHEMA,
+        "created_utc": "synthetic",
+        "definition": source_definition,
+        "definition_sha256": crossfit.sha256_json(source_definition),
+    }
+    protocol_path = root / "source_protocol.json"
+    crossfit._atomic_json(protocol_path, source_protocol)
+    protocol_sha256 = sha256_file(protocol_path)
+
+    counts = crossfit.SufficientCounts(
+        true_positive_events=100,
+        false_positive_events=10,
+        false_negative_events=5,
+        correct_objects=10,
+        object_count=10,
+        false_components=5,
+        frame_count=10,
+        event_count=1000,
+    )
+    metrics = crossfit.metrics_from_counts(counts)
+    zero_delta = {name: 0.0 for name in metrics}
+    candidates = crossfit.candidate_definitions(crossfit.CONSERVATIVE_V1_PROFILE)
+    folds = []
+    for fold_id in ("holdout_h1", "holdout_h2"):
+        folds.append(
+            {
+                "fold_id": fold_id,
+                "baseline": {"counts": counts.to_dict(), "metrics": metrics},
+                "candidate_results": [
+                    {
+                        **candidate,
+                        "counts": counts.to_dict(),
+                        "metrics": metrics,
+                        "delta": zero_delta,
+                        "false_component_delta": 0,
+                    }
+                    for candidate in candidates
+                ],
+                "winner_candidate_id": candidates[0]["candidate_id"],
+            }
+        )
+    report = {
+        "schema": crossfit.REPORT_SCHEMA,
+        "dataset_split": "train",
+        "evidence_class": (
+            "train_only_cross_source_held_block_consistency_not_unbiased_oof"
+        ),
+        "cache_manifest_path": str(manifest_path.resolve()),
+        "cache_manifest_sha256": manifest_sha256,
+        "protocol_path": str(protocol_path.resolve()),
+        "protocol_file_sha256": protocol_sha256,
+        "protocol_definition_sha256": source_protocol["definition_sha256"],
+        "fold_results": folds,
+        "promotion_gates": {
+            "passed": False,
+            "baseline_pooled": {"counts": counts.to_dict()},
+            "selected_pooled_oof": {
+                "counts": counts.to_dict(),
+                "delta": zero_delta,
+            },
+        },
+        "artifact": {"emitted": False, "path": None, "sha256": None},
+    }
+    report_path = root / "source_report.json"
+    crossfit._atomic_json(report_path, report)
+    report_sha256 = sha256_file(report_path)
+
+    singleton = dict(crossfit.candidate_definitions(crossfit.POSTHOC_V2_PROFILE)[0])
+    singleton["policy"] = crossfit.POSTHOC_SINGLETON_POLICY
+    diagnostic = {
+        "schema": crossfit.POSTHOC_DIAGNOSTIC_SCHEMA,
+        "evidence_class": crossfit.POSTHOC_DIAGNOSTIC_EVIDENCE_CLASS,
+        "source_protocol_sha256": protocol_sha256,
+        "source_crossfit_report_sha256": report_sha256,
+        "train_cache_manifest_sha256": manifest_sha256,
+        "original_grid": {
+            "positive_weights": [4.0, 8.0],
+            "keep_probabilities": [0.02, 0.05, 0.10, 0.20],
+            "outcome": "all candidates were exact no-ops",
+        },
+        "frozen_followup_hypothesis": singleton,
+    }
+    diagnostic_path = root / "posthoc_threshold_diagnostic.json"
+    crossfit._atomic_json(diagnostic_path, diagnostic)
+    diagnostic_sha256 = sha256_file(diagnostic_path)
+
+    policy = {
+        "schema": crossfit.POSTHOC_VALIDATION_POLICY_SCHEMA,
+        "status": "frozen_before_v2_artifact_and_before_validation_replay",
+        "evidence_class": (
+            "retrospective_train_hypothesis_with_one_frozen_validation_check"
+        ),
+        "hypothesis_source": {
+            "path": str(diagnostic_path.resolve()),
+            "sha256": diagnostic_sha256,
+            "positive_weight": 4.0,
+            "keep_probability": 0.4,
+            "l2": 0.1,
+        },
+        "evaluation_budget": {
+            "full_validation_replays": 1,
+            "threshold_or_hyperparameter_search_after_replay": False,
+            "allowed_follow_up_on_failure": (
+                "archive this suppression branch without tuning it on validation"
+            ),
+        },
+    }
+    policy_path = root / "validation_acceptance_policy.json"
+    crossfit._atomic_json(policy_path, policy)
+    policy_sha256 = sha256_file(policy_path)
+    return {
+        "current_definition": current_definition,
+        "manifest_path": manifest_path,
+        "report_path": report_path,
+        "report_sha256": report_sha256,
+        "diagnostic_path": diagnostic_path,
+        "diagnostic_sha256": diagnostic_sha256,
+        "policy_path": policy_path,
+        "policy_sha256": policy_sha256,
+    }
+
+
 class ComponentRerankerCrossfitTests(unittest.TestCase):
     def test_candidate_grid_is_exact_and_label_free(self):
         candidates = crossfit.candidate_definitions()
@@ -241,6 +394,23 @@ class ComponentRerankerCrossfitTests(unittest.TestCase):
             ],
         )
         self.assertEqual({item["l2"] for item in candidates}, {0.1})
+        self.assertEqual(
+            candidates,
+            crossfit.candidate_definitions(crossfit.CONSERVATIVE_V1_PROFILE),
+        )
+        self.assertEqual(
+            crossfit.candidate_definitions(crossfit.POSTHOC_V2_PROFILE),
+            [
+                {
+                    "candidate_id": "pw04_kp400",
+                    "positive_weight": 4.0,
+                    "keep_probability": 0.4,
+                    "l2": 0.1,
+                }
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            crossfit.candidate_definitions("unknown")
         self.assertEqual(crossfit.TOPOLOGY.spatial_radius, 1)
         self.assertEqual(crossfit.TOPOLOGY.max_component_events, 3)
         self.assertTrue(
@@ -338,6 +508,127 @@ class ComponentRerankerCrossfitTests(unittest.TestCase):
             result["winner_candidate_id"],
             {item["candidate_id"] for item in crossfit.candidate_definitions()},
         )
+
+    def test_posthoc_profile_runs_exactly_one_candidate_without_selection(self):
+        config_path = PROJECT_ROOT / "configs" / "evisseg_evuav.yaml"
+        cfg = replay.load_flat_config(config_path, c00_overrides())
+        videos = [
+            make_runtime_high_video("train_044.npz", "h1", 1),
+            make_runtime_high_video("train_088.npz", "h2", 2),
+            make_video("train_000.npz", "middle", 4, 3),
+        ]
+        result = crossfit._evaluate_fold(
+            crossfit.FOLD_PLAN[0],
+            videos,
+            cfg,
+            crossfit.POSTHOC_V2_PROFILE,
+        )
+        self.assertEqual(len(result["candidate_results"]), 1)
+        self.assertEqual(result["winner_candidate_id"], "pw04_kp400")
+        self.assertEqual(
+            result["candidate_results"][0]["keep_probability"], 0.4
+        )
+
+    def test_posthoc_source_diagnostic_lineage_and_tamper_guards(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            sources = make_synthetic_posthoc_sources(Path(temporary_dir))
+            patches = {
+                "POSTHOC_V1_REPORT_SHA256": sources["report_sha256"],
+                "POSTHOC_V1_REPORT_PATH": sources["report_path"].resolve(),
+                "POSTHOC_DIAGNOSTIC_PATH": sources["diagnostic_path"].resolve(),
+                "POSTHOC_DIAGNOSTIC_SHA256": sources["diagnostic_sha256"],
+                "POSTHOC_VALIDATION_POLICY_PATH": sources["policy_path"].resolve(),
+                "POSTHOC_VALIDATION_POLICY_SHA256": sources["policy_sha256"],
+            }
+            with mock.patch.multiple(crossfit, **patches):
+                metadata = crossfit._validate_posthoc_hypothesis_source(
+                    sources["report_path"],
+                    sources["report_sha256"],
+                    sources["diagnostic_path"],
+                    sources["diagnostic_sha256"],
+                    sources["current_definition"],
+                    sources["manifest_path"],
+                )
+            self.assertEqual(
+                metadata["hypothesis_origin"],
+                crossfit.POSTHOC_HYPOTHESIS_ORIGIN,
+            )
+            self.assertFalse(metadata["independent_oof_claim"])
+            self.assertEqual(
+                metadata["source_train_diagnostic"]["frozen_followup_hypothesis"],
+                {
+                    **crossfit.candidate_definitions(crossfit.POSTHOC_V2_PROFILE)[0],
+                    "policy": crossfit.POSTHOC_SINGLETON_POLICY,
+                },
+            )
+            self.assertEqual(
+                metadata["validation_acceptance_policy"]["full_validation_replays"],
+                1,
+            )
+
+            original_report = sources["report_path"].read_bytes()
+            sources["report_path"].write_bytes(original_report + b" ")
+            with mock.patch.multiple(crossfit, **patches):
+                with self.assertRaisesRegex(ValueError, "report SHA-256"):
+                    crossfit._validate_posthoc_hypothesis_source(
+                        sources["report_path"],
+                        sources["report_sha256"],
+                        sources["diagnostic_path"],
+                        sources["diagnostic_sha256"],
+                        sources["current_definition"],
+                        sources["manifest_path"],
+                    )
+            sources["report_path"].write_bytes(original_report)
+
+            original_policy = sources["policy_path"].read_bytes()
+            sources["policy_path"].write_bytes(original_policy + b" ")
+            with mock.patch.multiple(crossfit, **patches):
+                with self.assertRaisesRegex(ValueError, "policy SHA-256"):
+                    crossfit._validate_posthoc_hypothesis_source(
+                        sources["report_path"],
+                        sources["report_sha256"],
+                        sources["diagnostic_path"],
+                        sources["diagnostic_sha256"],
+                        sources["current_definition"],
+                        sources["manifest_path"],
+                    )
+            sources["policy_path"].write_bytes(original_policy)
+
+            diagnostic = json.loads(
+                sources["diagnostic_path"].read_text(encoding="utf-8")
+            )
+            diagnostic["frozen_followup_hypothesis"]["keep_probability"] = 0.41
+            crossfit._atomic_json(sources["diagnostic_path"], diagnostic)
+            tampered_sha256 = sha256_file(sources["diagnostic_path"])
+            with mock.patch.multiple(
+                crossfit,
+                POSTHOC_V1_REPORT_SHA256=sources["report_sha256"],
+                POSTHOC_V1_REPORT_PATH=sources["report_path"].resolve(),
+                POSTHOC_DIAGNOSTIC_PATH=sources["diagnostic_path"].resolve(),
+                POSTHOC_DIAGNOSTIC_SHA256=tampered_sha256,
+                POSTHOC_VALIDATION_POLICY_PATH=sources["policy_path"].resolve(),
+                POSTHOC_VALIDATION_POLICY_SHA256=sources["policy_sha256"],
+            ):
+                with self.assertRaisesRegex(ValueError, "exact singleton policy"):
+                    crossfit._validate_posthoc_hypothesis_source(
+                        sources["report_path"],
+                        sources["report_sha256"],
+                        sources["diagnostic_path"],
+                        tampered_sha256,
+                        sources["current_definition"],
+                        sources["manifest_path"],
+                    )
+
+    def test_profile_arguments_require_both_frozen_posthoc_sources(self):
+        crossfit._validate_profile_arguments(crossfit.CONSERVATIVE_V1_PROFILE)
+        with self.assertRaisesRegex(ValueError, "does not accept"):
+            crossfit._validate_profile_arguments(
+                crossfit.CONSERVATIVE_V1_PROFILE,
+                "unexpected.json",
+                "0" * 64,
+            )
+        with self.assertRaisesRegex(ValueError, "requires the source v1 report"):
+            crossfit._validate_profile_arguments(crossfit.POSTHOC_V2_PROFILE)
 
     def test_promotion_gates_pass_and_mismatched_winner_fails(self):
         baseline = crossfit.SufficientCounts(
@@ -562,6 +853,42 @@ class ComponentRerankerCrossfitTests(unittest.TestCase):
             self.assertEqual(loaded.topology.spatial_radius, 1)
             self.assertEqual(
                 loaded.provenance["crossfit_candidate_id"], "pw04_kp020"
+            )
+
+            posthoc_protocol = copy.deepcopy(protocol)
+            posthoc_protocol["definition"]["candidate_profile"] = (
+                crossfit.POSTHOC_V2_PROFILE
+            )
+            posthoc_protocol["definition"]["hypothesis"] = {
+                "hypothesis_origin": crossfit.POSTHOC_HYPOTHESIS_ORIGIN,
+                "independent_oof_claim": False,
+                "source_train_diagnostic": {"sha256": "7" * 64},
+                "validation_acceptance_policy": {"sha256": "8" * 64},
+            }
+            posthoc_payload = crossfit._artifact_for_full_refit(
+                fitted,
+                crossfit.candidate_definitions(crossfit.POSTHOC_V2_PROFILE)[0],
+                posthoc_protocol,
+                "e" * 64,
+                manifest,
+                "f" * 64,
+                cfg,
+                config_path,
+                {"passed": True},
+                [{"fold_id": "synthetic"}],
+                [video],
+            )
+            self.assertEqual(
+                posthoc_payload["fit"]["hyperparameter_selection"],
+                "retrospective_train_only_singleton_after_v1_noop_no_further_selection",
+            )
+            self.assertEqual(
+                posthoc_payload["provenance"]["crossfit_candidate_profile"],
+                crossfit.POSTHOC_V2_PROFILE,
+            )
+            self.assertEqual(
+                posthoc_payload["provenance"]["crossfit_hypothesis"],
+                posthoc_protocol["definition"]["hypothesis"],
             )
 
     def test_train_source_manifest_hash_has_injectable_synthetic_expectation(self):

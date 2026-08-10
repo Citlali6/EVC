@@ -115,6 +115,46 @@ POSITIVE_WEIGHTS = (4.0, 8.0)
 KEEP_PROBABILITIES = (0.02, 0.05, 0.10, 0.20)
 L2_PENALTY = 0.1
 MAX_ITERATIONS = 50
+CONSERVATIVE_V1_PROFILE = "conservative_v1"
+POSTHOC_V2_PROFILE = "posthoc_pw4_kp040_v2"
+CANDIDATE_PROFILES = (CONSERVATIVE_V1_PROFILE, POSTHOC_V2_PROFILE)
+POSTHOC_HYPOTHESIS_ORIGIN = "retrospective_train_only_after_v1_noop"
+POSTHOC_V1_REPORT_SHA256 = (
+    "e06182a03667e169b16fee7b02e7e44dd636457bc2b4d6f62265dcb6300577d0"
+)
+POSTHOC_V1_REPORT_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "experiments"
+    / "20260810_component_reranker_crosssource_v1"
+    / "crossfit_report.json"
+).resolve()
+POSTHOC_DIAGNOSTIC_SCHEMA = "ev-uav-component-reranker-posthoc-train-diagnostic-v1"
+POSTHOC_DIAGNOSTIC_EVIDENCE_CLASS = "retrospective_train_only_not_independent_oof"
+POSTHOC_DIAGNOSTIC_SHA256 = (
+    "5ba11e24c8f820773b9baf2c1b778131cdf30876dffbc64b4f2d4c06b17ef8e3"
+)
+POSTHOC_DIAGNOSTIC_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "experiments"
+    / "20260810_component_reranker_crosssource_v1"
+    / "posthoc_threshold_diagnostic.json"
+).resolve()
+POSTHOC_SINGLETON_POLICY = (
+    "Run as a singleton with no further candidate selection, then at most one "
+    "24-val replay. Do not tune 0.39, 0.41, or any other threshold from validation."
+)
+POSTHOC_VALIDATION_POLICY_SCHEMA = (
+    "ev-uav-component-reranker-singleton-validation-policy-v1"
+)
+POSTHOC_VALIDATION_POLICY_SHA256 = (
+    "8f26a10b8585e31a2bef26177a2bc6390292549f66ce4e0b39f6c51eecf9d987"
+)
+POSTHOC_VALIDATION_POLICY_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "experiments"
+    / "20260810_component_reranker_posthoc_singleton_v2"
+    / "validation_acceptance_policy.json"
+).resolve()
 POOLED_SCORE_DELTA_GATE = 0.0002
 FALSE_COMPONENT_REDUCTION_GATE = 0.01
 TOPOLOGY = ComponentTopology(
@@ -149,8 +189,19 @@ def _code_sha256(project_root):
     return result
 
 
-def candidate_definitions():
-    """Return the exact, deterministically ordered preregistered candidates."""
+def candidate_definitions(profile=CONSERVATIVE_V1_PROFILE):
+    """Return the exact candidates frozen by the named experiment profile."""
+    if profile not in CANDIDATE_PROFILES:
+        raise ValueError("Unsupported component-reranker candidate profile: {!r}.".format(profile))
+    if profile == POSTHOC_V2_PROFILE:
+        return [
+            {
+                "candidate_id": "pw04_kp400",
+                "positive_weight": 4.0,
+                "keep_probability": 0.40,
+                "l2": L2_PENALTY,
+            }
+        ]
     candidates = []
     for positive_weight in POSITIVE_WEIGHTS:
         for keep_probability in KEEP_PROBABILITIES:
@@ -451,14 +502,393 @@ def _validate_cache_population(
     return tuple(names), middle_names
 
 
+def _oof_definition(profile):
+    winner_rule = (
+        "maximum_held_score_then_candidate_id"
+        if profile == CONSERVATIVE_V1_PROFILE
+        else "singleton_candidate_no_hyperparameter_selection"
+    )
+    return {
+        "middle_reranker": "identity_after_full_c00_including_p18",
+        "winner_rule": winner_rule,
+        "pooling": "h1_held_plus_h2_held_plus_middle_identity_sufficient_counts_once",
+    }
+
+
+def _validate_profile_arguments(
+    profile,
+    hypothesis_source_report=None,
+    expected_hypothesis_source_report_sha256=None,
+    hypothesis_source_diagnostic=None,
+    expected_hypothesis_source_diagnostic_sha256=None,
+):
+    if profile not in CANDIDATE_PROFILES:
+        raise ValueError("Unsupported component-reranker candidate profile: {!r}.".format(profile))
+    has_report = hypothesis_source_report is not None
+    has_report_sha = expected_hypothesis_source_report_sha256 is not None
+    has_diagnostic = hypothesis_source_diagnostic is not None
+    has_diagnostic_sha = expected_hypothesis_source_diagnostic_sha256 is not None
+    if profile == CONSERVATIVE_V1_PROFILE:
+        if has_report or has_report_sha or has_diagnostic or has_diagnostic_sha:
+            raise ValueError(
+                "conservative_v1 does not accept retrospective hypothesis-source inputs."
+            )
+        return
+    if not (has_report and has_report_sha and has_diagnostic and has_diagnostic_sha):
+        raise ValueError(
+            "posthoc_pw4_kp040_v2 requires the source v1 report and post-hoc "
+            "diagnostic, each with an expected SHA-256."
+        )
+    expected = _require_sha256(
+        expected_hypothesis_source_report_sha256,
+        "expected hypothesis source report SHA-256",
+    )
+    if expected != POSTHOC_V1_REPORT_SHA256:
+        raise ValueError(
+            "posthoc_pw4_kp040_v2 is bound to the first v1 no-op report SHA-256."
+        )
+    report_path = Path(hypothesis_source_report).resolve()
+    if os.path.normcase(str(report_path)) != os.path.normcase(
+        str(POSTHOC_V1_REPORT_PATH)
+    ):
+        raise ValueError(
+            "posthoc_pw4_kp040_v2 requires the frozen first v1 report path."
+        )
+    expected_diagnostic = _require_sha256(
+        expected_hypothesis_source_diagnostic_sha256,
+        "expected hypothesis source diagnostic SHA-256",
+    )
+    if expected_diagnostic != POSTHOC_DIAGNOSTIC_SHA256:
+        raise ValueError(
+            "posthoc_pw4_kp040_v2 is bound to the frozen train-only diagnostic SHA-256."
+        )
+    diagnostic_path = Path(hypothesis_source_diagnostic).resolve()
+    if os.path.normcase(str(diagnostic_path)) != os.path.normcase(
+        str(POSTHOC_DIAGNOSTIC_PATH)
+    ):
+        raise ValueError(
+            "posthoc_pw4_kp040_v2 requires the frozen train-only diagnostic path."
+        )
+
+
+def _no_op_v1_report_check(report):
+    expected_candidates = candidate_definitions(CONSERVATIVE_V1_PROFILE)
+    expected_ids = [candidate["candidate_id"] for candidate in expected_candidates]
+    folds = report.get("fold_results")
+    if not isinstance(folds, list) or [fold.get("fold_id") for fold in folds] != [
+        "holdout_h1",
+        "holdout_h2",
+    ]:
+        raise ValueError("Hypothesis source report does not contain the frozen two folds.")
+    for fold in folds:
+        baseline = fold.get("baseline")
+        if not isinstance(baseline, dict):
+            raise ValueError("Hypothesis source report fold is missing its baseline.")
+        results = fold.get("candidate_results")
+        if not isinstance(results, list) or [
+            result.get("candidate_id") for result in results
+        ] != expected_ids:
+            raise ValueError(
+                "Hypothesis source report is not the exact conservative_v1 grid."
+            )
+        for expected, result in zip(expected_candidates, results):
+            observed = {name: result.get(name) for name in expected}
+            if observed != expected:
+                raise ValueError(
+                    "Hypothesis source report candidate definition was modified."
+                )
+            if result.get("counts") != baseline.get("counts"):
+                raise ValueError(
+                    "Hypothesis source report is not a strict all-candidate no-op."
+                )
+            if result.get("metrics") != baseline.get("metrics"):
+                raise ValueError(
+                    "Hypothesis source report no-op metrics differ from baseline."
+                )
+            delta = result.get("delta")
+            if not isinstance(delta, dict) or any(float(value) != 0.0 for value in delta.values()):
+                raise ValueError(
+                    "Hypothesis source report contains a nonzero candidate delta."
+                )
+            if int(result.get("false_component_delta", 1)) != 0:
+                raise ValueError(
+                    "Hypothesis source report contains a false-component change."
+                )
+        if fold.get("winner_candidate_id") != expected_ids[0]:
+            raise ValueError("Hypothesis source report v1 tie-break winner was modified.")
+
+    gates = report.get("promotion_gates")
+    if not isinstance(gates, dict) or gates.get("passed") is not False:
+        raise ValueError("Hypothesis source v1 report must have failed its frozen gates.")
+    baseline_pooled = gates.get("baseline_pooled", {})
+    selected_pooled = gates.get("selected_pooled_oof", {})
+    if selected_pooled.get("counts") != baseline_pooled.get("counts"):
+        raise ValueError("Hypothesis source v1 pooled result is not a strict no-op.")
+    pooled_delta = selected_pooled.get("delta")
+    if not isinstance(pooled_delta, dict) or any(
+        float(value) != 0.0 for value in pooled_delta.values()
+    ):
+        raise ValueError("Hypothesis source v1 pooled delta is not zero.")
+    artifact = report.get("artifact")
+    if artifact != {"emitted": False, "path": None, "sha256": None}:
+        raise ValueError("Hypothesis source v1 report must not have emitted an artifact.")
+
+
+def _validation_acceptance_policy_metadata(source_diagnostic_path):
+    policy_path = Path(POSTHOC_VALIDATION_POLICY_PATH).resolve()
+    if not policy_path.is_file():
+        raise FileNotFoundError(
+            "Frozen singleton validation acceptance policy does not exist: {}".format(
+                policy_path
+            )
+        )
+    actual_sha256 = sha256_file(policy_path)
+    if actual_sha256 != POSTHOC_VALIDATION_POLICY_SHA256:
+        raise ValueError("Frozen singleton validation acceptance policy SHA-256 differs.")
+    with policy_path.open("r", encoding="utf-8") as stream:
+        policy = json.load(stream)
+    if not isinstance(policy, dict) or policy.get("schema") != (
+        POSTHOC_VALIDATION_POLICY_SCHEMA
+    ):
+        raise ValueError("Frozen singleton validation acceptance policy schema is invalid.")
+    if policy.get("status") != "frozen_before_v2_artifact_and_before_validation_replay":
+        raise ValueError("Singleton validation policy was not frozen before replay.")
+    if policy.get("evidence_class") != (
+        "retrospective_train_hypothesis_with_one_frozen_validation_check"
+    ):
+        raise ValueError("Singleton validation policy evidence class is invalid.")
+    hypothesis_source = policy.get("hypothesis_source")
+    if not isinstance(hypothesis_source, dict):
+        raise ValueError("Singleton validation policy is missing its hypothesis source.")
+    policy_diagnostic_path = Path(str(hypothesis_source.get("path", ""))).resolve()
+    if os.path.normcase(str(policy_diagnostic_path)) != os.path.normcase(
+        str(Path(source_diagnostic_path).resolve())
+    ):
+        raise ValueError("Singleton validation policy points to a different diagnostic.")
+    expected_source = {
+        "sha256": POSTHOC_DIAGNOSTIC_SHA256,
+        "positive_weight": 4.0,
+        "keep_probability": 0.4,
+        "l2": 0.1,
+    }
+    if {name: hypothesis_source.get(name) for name in expected_source} != expected_source:
+        raise ValueError("Singleton validation policy hypothesis binding differs.")
+    budget = policy.get("evaluation_budget")
+    if not isinstance(budget, dict) or {
+        "full_validation_replays": budget.get("full_validation_replays"),
+        "threshold_or_hyperparameter_search_after_replay": budget.get(
+            "threshold_or_hyperparameter_search_after_replay"
+        ),
+        "allowed_follow_up_on_failure": budget.get("allowed_follow_up_on_failure"),
+    } != {
+        "full_validation_replays": 1,
+        "threshold_or_hyperparameter_search_after_replay": False,
+        "allowed_follow_up_on_failure": (
+            "archive this suppression branch without tuning it on validation"
+        ),
+    }:
+        raise ValueError("Singleton validation policy budget differs from the frozen rule.")
+    return {
+        "path": str(policy_path),
+        "sha256": actual_sha256,
+        "schema": POSTHOC_VALIDATION_POLICY_SCHEMA,
+        "status": policy["status"],
+        "full_validation_replays": 1,
+        "threshold_or_hyperparameter_search_after_replay": False,
+        "failure_action": "archive_without_validation_tuning",
+    }
+
+
+def _validate_posthoc_hypothesis_source(
+    source_report_path,
+    expected_source_report_sha256,
+    source_diagnostic_path,
+    expected_source_diagnostic_sha256,
+    current_definition,
+    current_manifest_path,
+):
+    """Validate and summarize the immutable v1 report that generated v2."""
+    _validate_profile_arguments(
+        POSTHOC_V2_PROFILE,
+        source_report_path,
+        expected_source_report_sha256,
+        source_diagnostic_path,
+        expected_source_diagnostic_sha256,
+    )
+    source_diagnostic_path = Path(source_diagnostic_path).resolve()
+    expected_source_diagnostic_sha256 = _require_sha256(
+        expected_source_diagnostic_sha256,
+        "expected hypothesis source diagnostic SHA-256",
+    )
+    actual_diagnostic_sha256 = sha256_file(source_diagnostic_path)
+    if actual_diagnostic_sha256 != expected_source_diagnostic_sha256:
+        raise ValueError(
+            "Hypothesis source diagnostic SHA-256 {} does not match expected {}."
+            .format(actual_diagnostic_sha256, expected_source_diagnostic_sha256)
+        )
+    with source_diagnostic_path.open("r", encoding="utf-8") as stream:
+        diagnostic = json.load(stream)
+    if not isinstance(diagnostic, dict) or diagnostic.get("schema") != (
+        POSTHOC_DIAGNOSTIC_SCHEMA
+    ):
+        raise ValueError("Hypothesis source train-only diagnostic schema is invalid.")
+    if diagnostic.get("evidence_class") != POSTHOC_DIAGNOSTIC_EVIDENCE_CLASS:
+        raise ValueError("Hypothesis source train-only diagnostic evidence class is invalid.")
+    if diagnostic.get("original_grid") != {
+        "positive_weights": [4.0, 8.0],
+        "keep_probabilities": [0.02, 0.05, 0.10, 0.20],
+        "outcome": "all candidates were exact no-ops",
+    }:
+        raise ValueError("Hypothesis source diagnostic v1 outcome is invalid.")
+    expected_singleton = dict(candidate_definitions(POSTHOC_V2_PROFILE)[0])
+    expected_singleton["policy"] = POSTHOC_SINGLETON_POLICY
+    if diagnostic.get("frozen_followup_hypothesis") != expected_singleton:
+        raise ValueError(
+            "Hypothesis source diagnostic does not freeze the exact singleton policy."
+        )
+
+    source_report_path = Path(source_report_path).resolve()
+    if not source_report_path.is_file():
+        raise FileNotFoundError(
+            "Hypothesis source v1 report does not exist: {}".format(source_report_path)
+        )
+    expected_source_report_sha256 = _require_sha256(
+        expected_source_report_sha256,
+        "expected hypothesis source report SHA-256",
+    )
+    actual_report_sha256 = sha256_file(source_report_path)
+    if actual_report_sha256 != expected_source_report_sha256:
+        raise ValueError(
+            "Hypothesis source v1 report SHA-256 {} does not match expected {}."
+            .format(actual_report_sha256, expected_source_report_sha256)
+        )
+    with source_report_path.open("r", encoding="utf-8") as stream:
+        report = json.load(stream)
+    if not isinstance(report, dict) or report.get("schema") != REPORT_SCHEMA:
+        raise ValueError("Hypothesis source v1 report schema is invalid.")
+    if report.get("dataset_split") != "train":
+        raise ValueError("Hypothesis source report must use only the train split.")
+    if report.get("evidence_class") != (
+        "train_only_cross_source_held_block_consistency_not_unbiased_oof"
+    ):
+        raise ValueError("Hypothesis source report evidence class is invalid.")
+
+    current_manifest_path = Path(current_manifest_path).resolve()
+    current_manifest_sha256 = current_definition["dataset"]["cache_manifest_sha256"]
+    if sha256_file(current_manifest_path) != current_manifest_sha256:
+        raise ValueError("Current train-cache manifest changed during source validation.")
+    report_manifest_path = Path(str(report.get("cache_manifest_path", ""))).resolve()
+    if os.path.normcase(str(report_manifest_path)) != os.path.normcase(
+        str(current_manifest_path)
+    ):
+        raise ValueError("Hypothesis source report points to a different train cache.")
+    if report.get("cache_manifest_sha256") != current_manifest_sha256:
+        raise ValueError("Hypothesis source report train-cache SHA-256 lineage differs.")
+
+    source_protocol_path = Path(str(report.get("protocol_path", ""))).resolve()
+    source_protocol_sha256 = _require_sha256(
+        report.get("protocol_file_sha256", ""),
+        "hypothesis source protocol file SHA-256",
+    )
+    source_protocol, actual_protocol_sha256 = load_frozen_protocol(
+        source_protocol_path,
+        source_protocol_sha256,
+    )
+    if actual_protocol_sha256 != source_protocol_sha256:
+        raise RuntimeError("Hypothesis source protocol SHA-256 validation was inconsistent.")
+    if report.get("protocol_definition_sha256") != source_protocol.get(
+        "definition_sha256"
+    ):
+        raise ValueError("Hypothesis source report/protocol definition lineage differs.")
+    if diagnostic.get("source_protocol_sha256") != source_protocol_sha256:
+        raise ValueError("Hypothesis diagnostic/source protocol SHA-256 lineage differs.")
+    if diagnostic.get("source_crossfit_report_sha256") != actual_report_sha256:
+        raise ValueError("Hypothesis diagnostic/source report SHA-256 lineage differs.")
+    if diagnostic.get("train_cache_manifest_sha256") != current_manifest_sha256:
+        raise ValueError("Hypothesis diagnostic/train-cache SHA-256 lineage differs.")
+    source_definition = source_protocol["definition"]
+    if source_definition.get("candidate_profile", CONSERVATIVE_V1_PROFILE) != (
+        CONSERVATIVE_V1_PROFILE
+    ):
+        raise ValueError("Hypothesis source protocol is not conservative_v1.")
+    if source_definition.get("candidates") != candidate_definitions(
+        CONSERVATIVE_V1_PROFILE
+    ):
+        raise ValueError("Hypothesis source protocol candidate grid was modified.")
+    if source_definition.get("oof") != _oof_definition(CONSERVATIVE_V1_PROFILE):
+        raise ValueError("Hypothesis source protocol v1 winner rule was modified.")
+    common_lineage_keys = (
+        "dataset",
+        "blocks",
+        "fold_plan",
+        "topology",
+        "fit",
+        "scoring",
+        "gates",
+        "promotion",
+        "config",
+    )
+    for name in common_lineage_keys:
+        if source_definition.get(name) != current_definition.get(name):
+            raise ValueError(
+                "Hypothesis source protocol differs in frozen {} lineage.".format(name)
+            )
+    _no_op_v1_report_check(report)
+    return {
+        "hypothesis_origin": POSTHOC_HYPOTHESIS_ORIGIN,
+        "retrospective": True,
+        "independent_oof_claim": False,
+        "candidate_selection_after_source": "singleton_only_no_further_search",
+        "source_v1_report": {
+            "path": str(source_report_path),
+            "expected_sha256": expected_source_report_sha256,
+            "sha256": actual_report_sha256,
+            "protocol_path": str(source_protocol_path),
+            "protocol_file_sha256": source_protocol_sha256,
+            "protocol_definition_sha256": source_protocol["definition_sha256"],
+            "cache_manifest_path": str(current_manifest_path),
+            "cache_manifest_sha256": current_manifest_sha256,
+            "promotion_gates_passed": False,
+            "artifact_emitted": False,
+            "candidate_outcome": "all_eight_conservative_v1_candidates_strict_noop",
+        },
+        "source_train_diagnostic": {
+            "path": str(source_diagnostic_path),
+            "expected_sha256": expected_source_diagnostic_sha256,
+            "sha256": actual_diagnostic_sha256,
+            "schema": POSTHOC_DIAGNOSTIC_SCHEMA,
+            "evidence_class": POSTHOC_DIAGNOSTIC_EVIDENCE_CLASS,
+            "source_protocol_sha256": source_protocol_sha256,
+            "source_crossfit_report_sha256": actual_report_sha256,
+            "train_cache_manifest_sha256": current_manifest_sha256,
+            "frozen_followup_hypothesis": expected_singleton,
+        },
+        "validation_acceptance_policy": _validation_acceptance_policy_metadata(
+            source_diagnostic_path
+        ),
+    }
+
+
 def _build_protocol_definition(
     cache_dir,
     config_path,
     overrides,
     prediction_threshold=PREDICTION_THRESHOLD,
+    candidate_profile=CONSERVATIVE_V1_PROFILE,
+    hypothesis_source_report=None,
+    expected_hypothesis_source_report_sha256=None,
+    hypothesis_source_diagnostic=None,
+    expected_hypothesis_source_diagnostic_sha256=None,
 ):
+    _validate_profile_arguments(
+        candidate_profile,
+        hypothesis_source_report,
+        expected_hypothesis_source_report_sha256,
+        hypothesis_source_diagnostic,
+        expected_hypothesis_source_diagnostic_sha256,
+    )
     project_root = Path(__file__).resolve().parent
-    cache_dir, _, manifest_sha256, manifest = load_train_cache(cache_dir)
+    cache_dir, manifest_path, manifest_sha256, manifest = load_train_cache(cache_dir)
     selected_names, middle_names = _validate_cache_population(manifest, cache_dir)
     config_path = Path(config_path).resolve()
     if not config_path.is_file():
@@ -504,7 +934,8 @@ def _build_protocol_definition(
             "middle": list(middle_names),
         },
         "fold_plan": [dict(item) for item in FOLD_PLAN],
-        "candidates": candidate_definitions(),
+        "candidate_profile": candidate_profile,
+        "candidates": candidate_definitions(candidate_profile),
         "topology": TOPOLOGY.to_dict(),
         "fit": {
             "algorithm": "deterministic_domain_video_component_weighted_logistic_newton",
@@ -520,11 +951,7 @@ def _build_protocol_definition(
             "source_identity_is_feature": False,
             "block_identity_is_feature": False,
         },
-        "oof": {
-            "middle_reranker": "identity_after_full_c00_including_p18",
-            "winner_rule": "maximum_held_score_then_candidate_id",
-            "pooling": "h1_held_plus_h2_held_plus_middle_identity_sufficient_counts_once",
-        },
+        "oof": _oof_definition(candidate_profile),
         "scoring": {
             "prediction_threshold": float(prediction_threshold),
             "pd_detection_interval": PD_DETECTION_INTERVAL,
@@ -571,6 +998,15 @@ def _build_protocol_definition(
             "opencv": cv2.__version__,
         },
     }
+    if candidate_profile == POSTHOC_V2_PROFILE:
+        definition["hypothesis"] = _validate_posthoc_hypothesis_source(
+            hypothesis_source_report,
+            expected_hypothesis_source_report_sha256,
+            hypothesis_source_diagnostic,
+            expected_hypothesis_source_diagnostic_sha256,
+            definition,
+            manifest_path,
+        )
     return definition
 
 
@@ -583,6 +1019,19 @@ def preregister_protocol(args):
         args.config,
         args.override,
         prediction_threshold=float(args.prediction_threshold),
+        candidate_profile=getattr(
+            args, "candidate_profile", CONSERVATIVE_V1_PROFILE
+        ),
+        hypothesis_source_report=getattr(args, "hypothesis_source_report", None),
+        expected_hypothesis_source_report_sha256=(
+            getattr(args, "expected_hypothesis_source_report_sha256", None)
+        ),
+        hypothesis_source_diagnostic=getattr(
+            args, "hypothesis_source_diagnostic", None
+        ),
+        expected_hypothesis_source_diagnostic_sha256=(
+            getattr(args, "expected_hypothesis_source_diagnostic_sha256", None)
+        ),
     )
     payload = {
         "schema": PROTOCOL_SCHEMA,
@@ -1093,19 +1542,25 @@ def select_fold_winner(candidate_results):
     )[0]
 
 
-def _evaluate_fold(fold, videos, cfg):
+def _evaluate_fold(
+    fold,
+    videos,
+    cfg,
+    candidate_profile=CONSERVATIVE_V1_PROFILE,
+):
     fit_videos, held = partition_fold_videos(fold, videos)
     features, labels, base_weights, fit_sources = balanced_component_dataset(
         fit_videos, {fold["fit_high_block"]}
     )
     held_baseline_counts = _sum_counts(held)
     held_baseline_metrics = metrics_from_counts(held_baseline_counts)
+    candidates = candidate_definitions(candidate_profile)
     fitted_by_weight = {
         weight: fit_balanced_logistic(features, labels, base_weights, weight)
-        for weight in POSITIVE_WEIGHTS
+        for weight in sorted({candidate["positive_weight"] for candidate in candidates})
     }
     candidate_results = []
-    for candidate in candidate_definitions():
+    for candidate in candidates:
         fitted = fitted_by_weight[candidate["positive_weight"]]
         counts = SufficientCounts()
         for video in held:
@@ -1255,6 +1710,17 @@ def _artifact_for_full_refit(
     fold_results,
     videos,
 ):
+    protocol_definition = protocol_payload["definition"]
+    candidate_profile = protocol_definition.get(
+        "candidate_profile", CONSERVATIVE_V1_PROFILE
+    )
+    hypothesis = protocol_definition.get("hypothesis")
+    if candidate_profile == POSTHOC_V2_PROFILE:
+        hyperparameter_selection = (
+            "retrospective_train_only_singleton_after_v1_noop_no_further_selection"
+        )
+    else:
+        hyperparameter_selection = "frozen_train_only_two_block_crossfit_common_winner"
     p0_config = P0ClusterFilter.from_cfg(
         cfg,
         PREDICTION_THRESHOLD,
@@ -1288,7 +1754,7 @@ def _artifact_for_full_refit(
             "iterations": fitted["iterations"],
             "converged": fitted["converged"],
             "weighted_loss": fitted["weighted_loss"],
-            "hyperparameter_selection": "frozen_train_only_two_block_crossfit_common_winner",
+            "hyperparameter_selection": hyperparameter_selection,
         },
         "provenance": {
             "dataset_split": "train",
@@ -1309,7 +1775,7 @@ def _artifact_for_full_refit(
             ],
             "config_path": str(config_path),
             "config_sha256": sha256_file(config_path),
-            "config_overrides": protocol_payload["definition"]["config"]["overrides"],
+            "config_overrides": protocol_definition["config"]["overrides"],
             "fit_script_sha256": sha256_file(Path(__file__).resolve()),
             "component_module_sha256": sha256_file(
                 project_root / "utils" / "component_reranker.py"
@@ -1319,15 +1785,20 @@ def _artifact_for_full_refit(
             "crossfit_protocol_definition_sha256": protocol_payload[
                 "definition_sha256"
             ],
-            "crossfit_protocol_document_sha256": protocol_payload["definition"][
+            "crossfit_protocol_document_sha256": protocol_definition[
                 "frozen_document"
             ]["sha256"],
-            "crossfit_code_sha256": protocol_payload["definition"]["code_sha256"],
-            "crossfit_software_versions": protocol_payload["definition"][
-                "software_versions"
-            ],
+            "crossfit_code_sha256": protocol_definition["code_sha256"],
+            "crossfit_software_versions": protocol_definition["software_versions"],
             "crossfit_oof_evidence_sha256": sha256_json(oof_evidence),
             "crossfit_candidate_id": candidate["candidate_id"],
+            "crossfit_candidate_profile": candidate_profile,
+            "crossfit_evidence_class": (
+                "retrospective_train_only_not_independent_oof"
+                if candidate_profile == POSTHOC_V2_PROFILE
+                else "train_only_cross_source_held_block_consistency_not_unbiased_oof"
+            ),
+            "crossfit_hypothesis": hypothesis,
         },
         "train_diagnostics_in_sample_only": {
             "video_count": len(videos),
@@ -1445,6 +1916,38 @@ def run_crossfit(args):
         args.protocol, args.expected_protocol_sha256
     )
     definition = protocol_payload["definition"]
+    candidate_profile = definition.get(
+        "candidate_profile", CONSERVATIVE_V1_PROFILE
+    )
+    expected_candidates = candidate_definitions(candidate_profile)
+    if definition.get("candidates") != expected_candidates:
+        raise ValueError("Frozen candidate profile and candidate definitions differ.")
+    hypothesis_source_report = None
+    expected_hypothesis_source_report_sha256 = None
+    hypothesis_source_diagnostic = None
+    expected_hypothesis_source_diagnostic_sha256 = None
+    if candidate_profile == POSTHOC_V2_PROFILE:
+        hypothesis = definition.get("hypothesis")
+        if not isinstance(hypothesis, dict) or hypothesis.get(
+            "hypothesis_origin"
+        ) != POSTHOC_HYPOTHESIS_ORIGIN:
+            raise ValueError("Frozen post-hoc hypothesis provenance is invalid.")
+        source_v1_report = hypothesis.get("source_v1_report")
+        if not isinstance(source_v1_report, dict):
+            raise ValueError("Frozen post-hoc hypothesis is missing its v1 source report.")
+        hypothesis_source_report = source_v1_report.get("path")
+        expected_hypothesis_source_report_sha256 = source_v1_report.get(
+            "expected_sha256"
+        )
+        source_diagnostic = hypothesis.get("source_train_diagnostic")
+        if not isinstance(source_diagnostic, dict):
+            raise ValueError(
+                "Frozen post-hoc hypothesis is missing its train-only diagnostic."
+            )
+        hypothesis_source_diagnostic = source_diagnostic.get("path")
+        expected_hypothesis_source_diagnostic_sha256 = source_diagnostic.get(
+            "expected_sha256"
+        )
     config_definition = definition.get("config", {})
     config_path = Path(str(config_definition.get("path", ""))).resolve()
     overrides = config_definition.get("overrides")
@@ -1455,6 +1958,15 @@ def run_crossfit(args):
         config_path,
         overrides,
         prediction_threshold=PREDICTION_THRESHOLD,
+        candidate_profile=candidate_profile,
+        hypothesis_source_report=hypothesis_source_report,
+        expected_hypothesis_source_report_sha256=(
+            expected_hypothesis_source_report_sha256
+        ),
+        hypothesis_source_diagnostic=hypothesis_source_diagnostic,
+        expected_hypothesis_source_diagnostic_sha256=(
+            expected_hypothesis_source_diagnostic_sha256
+        ),
     )
     if rebuilt_definition != definition:
         raise ValueError(
@@ -1469,7 +1981,7 @@ def run_crossfit(args):
     validate_c00_config(cfg)
     videos = _prepare_videos(cache_dir, manifest, cfg, set(middle_names))
     fold_results = [
-        _evaluate_fold(fold, videos, cfg)
+        _evaluate_fold(fold, videos, cfg, candidate_profile)
         for fold in FOLD_PLAN
     ]
     middle_baseline_counts = _sum_counts(
@@ -1482,6 +1994,15 @@ def run_crossfit(args):
             config_path,
             overrides,
             prediction_threshold=PREDICTION_THRESHOLD,
+            candidate_profile=candidate_profile,
+            hypothesis_source_report=hypothesis_source_report,
+            expected_hypothesis_source_report_sha256=(
+                expected_hypothesis_source_report_sha256
+            ),
+            hypothesis_source_diagnostic=hypothesis_source_diagnostic,
+            expected_hypothesis_source_diagnostic_sha256=(
+                expected_hypothesis_source_diagnostic_sha256
+            ),
         )
         != definition
     ):
@@ -1493,7 +2014,7 @@ def run_crossfit(args):
         common_candidate_id = fold_results[0]["winner_candidate_id"]
         candidate = next(
             item
-            for item in candidate_definitions()
+            for item in candidate_definitions(candidate_profile)
             if item["candidate_id"] == common_candidate_id
         )
         features, labels, base_weights, _ = balanced_component_dataset(
@@ -1520,13 +2041,33 @@ def run_crossfit(args):
         )
 
     def build_report(artifact_sha256):
+        if candidate_profile == POSTHOC_V2_PROFILE:
+            evidence_class = (
+                "retrospective_train_only_cross_source_consistency_not_independent_oof"
+            )
+            note = (
+                "The singleton pw4/kp0.40 hypothesis was chosen retrospectively after "
+                "the bound conservative_v1 train-only no-op report. The same held train "
+                "blocks are reused here only as a consistency gate, so this is not an "
+                "independent or unbiased OOF estimate. No validation or leaderboard data "
+                "was used."
+            )
+        else:
+            evidence_class = (
+                "train_only_cross_source_held_block_consistency_not_unbiased_oof"
+            )
+            note = (
+                "Train-only cross-source held-block consistency evidence; the held "
+                "blocks also select candidates, so this is not claimed as an unbiased "
+                "independent OOF estimate. No validation or leaderboard data was used."
+            )
         return {
             "schema": REPORT_SCHEMA,
             "created_utc": _utc_now(),
             "dataset_split": "train",
-            "evidence_class": (
-                "train_only_cross_source_held_block_consistency_not_unbiased_oof"
-            ),
+            "evidence_class": evidence_class,
+            "candidate_profile": candidate_profile,
+            "hypothesis": definition.get("hypothesis"),
             "protocol_path": str(Path(args.protocol).resolve()),
             "protocol_file_sha256": protocol_file_sha256,
             "protocol_definition_sha256": protocol_payload["definition_sha256"],
@@ -1545,11 +2086,7 @@ def run_crossfit(args):
                 "path": str(output_model) if artifact is not None else None,
                 "sha256": artifact_sha256,
             },
-            "note": (
-                "Train-only cross-source held-block consistency evidence; the held "
-                "blocks also select candidates, so this is not claimed as an unbiased "
-                "independent OOF estimate. No validation or leaderboard data was used."
-            ),
+            "note": note,
         }
 
     artifact_sha256 = publish_crossfit_outputs(
@@ -1583,6 +2120,15 @@ def build_parser():
     preregister.add_argument("--output-protocol", required=True)
     preregister.add_argument("--prediction-threshold", type=float, default=0.719)
     preregister.add_argument("--expected-selected-videos", type=int, required=True)
+    preregister.add_argument(
+        "--candidate-profile",
+        choices=CANDIDATE_PROFILES,
+        default=CONSERVATIVE_V1_PROFILE,
+    )
+    preregister.add_argument("--hypothesis-source-report")
+    preregister.add_argument("--expected-hypothesis-source-report-sha256")
+    preregister.add_argument("--hypothesis-source-diagnostic")
+    preregister.add_argument("--expected-hypothesis-source-diagnostic-sha256")
     preregister.set_defaults(handler=preregister_protocol)
 
     run = subparsers.add_parser(

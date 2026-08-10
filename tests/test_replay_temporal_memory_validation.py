@@ -847,6 +847,17 @@ class ExactReplayTest(unittest.TestCase):
 
 
 class FilesystemSafetyTest(unittest.TestCase):
+    def test_atomic_torch_cache_is_no_clobber_unless_overwrite_is_explicit(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "cache.pt"
+            output.write_bytes(b"concurrent-sentinel")
+            with self.assertRaises(FileExistsError):
+                replay._atomic_torch_save({"new": True}, output)
+            self.assertEqual(output.read_bytes(), b"concurrent-sentinel")
+            self.assertEqual(list(output.parent.glob(output.name + ".*.tmp")), [])
+            replay._atomic_torch_save({"new": True}, output, overwrite=True)
+            self.assertEqual(replay._torch_load_cpu(output), {"new": True})
+
     def test_atomic_json_failure_preserves_existing_output(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "result.json"

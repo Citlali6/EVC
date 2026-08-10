@@ -289,7 +289,11 @@ def _dataset_signature(records: Sequence[Mapping]) -> str:
     return digest.hexdigest()
 
 
-def _atomic_torch_save(payload: dict, output_path: Path) -> None:
+def _atomic_torch_save(
+    payload: dict,
+    output_path: Path,
+    overwrite: bool = False,
+) -> None:
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -304,7 +308,12 @@ def _atomic_torch_save(payload: dict, output_path: Path) -> None:
             torch.save(payload, handle)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(str(temporary_path), str(output_path))
+        if overwrite:
+            os.replace(str(temporary_path), str(output_path))
+        else:
+            # Publish by exclusive hard link.  Unlike an exists-then-replace
+            # sequence, this cannot clobber a concurrently created cache.
+            os.link(str(temporary_path), str(output_path))
     finally:
         if temporary_path.exists():
             temporary_path.unlink()
@@ -316,6 +325,7 @@ def build_raw_cache(
     cfg,
     expected_video_count: int = 24,
     device_name: str = "cuda:0",
+    overwrite: bool = False,
 ) -> dict:
     """Run one checkpoint once per complete validation video and save raw scores."""
 
@@ -458,7 +468,7 @@ def build_raw_cache(
     }
     payload = {"metadata": metadata, "records": records}
     validate_cache_payload(payload, "new raw cache")
-    _atomic_torch_save(payload, output_path)
+    _atomic_torch_save(payload, output_path, overwrite=overwrite)
     return payload
 
 
@@ -1728,6 +1738,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             cfg,
             expected_video_count=args.expected_video_count,
             device_name=args.device,
+            overwrite=args.force,
         )
         print("raw cache:", output_path)
         print("checkpoint sha256:", payload["metadata"]["checkpoint_sha256"])

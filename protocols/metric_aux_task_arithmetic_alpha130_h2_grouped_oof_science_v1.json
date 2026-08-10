@@ -1,0 +1,194 @@
+{
+  "schema": "ev-uav-temporal-memory-metric-aux-task-arithmetic-alpha130-h2-grouped-oof-v1",
+  "created_utc": "2026-08-10T16:42:00Z",
+  "status": "frozen_after_alpha1_train_only_oof_and_all11_geometry_before_any_alpha130_checkpoint_or_inference",
+  "experiment_id": "metric_aux_task_arithmetic_alpha130_h2_grouped_oof_v1",
+  "evidence_class": "adaptive_train_only_fixed_alpha_extrapolation_not_an_independent_generalization_estimate",
+  "claim_scope": "test_one_fixed_alpha130_weight_space_extrapolation_on_the_same_three_held_train_h2_groups",
+  "adaptive_selection_disclosure": {
+    "alpha1_oof_results_were_observed_before_alpha130_was_fixed": true,
+    "all11_alpha1_task_geometry_was_observed_before_alpha130_was_fixed": true,
+    "same_eleven_h2_train_sources_and_same_released_m20_parent_are_reused": true,
+    "alpha130_was_fixed_as_one_rounded_value_not_selected_from_a_new_grid": true,
+    "derivation": "0.0002 divided by the weakest observed alpha1 fold score gain 0.00015539966484023893 equals 1.2870040618; round upward once to 1.30",
+    "independent_oof_or_validation_claim_allowed": false,
+    "failure_action": "archive_and_retain_alpha1_without_a_second_alpha_module_mask_projection_threshold_or_c00_attempt"
+  },
+  "fixed_candidate": {
+    "alpha": 1.3,
+    "candidate_count": 1,
+    "per_fold_formula": "W_alpha130 = W_released_m20 + 1.30 * (W_metric_aux_e3 - W_baseline_e3)",
+    "arithmetic_order": "for each model_state_dict key, cast released M20, baseline E3 and metric-aux E3 float32 operands to float64, compute parent + 1.30 * (aux - baseline), then cast once to parent float32",
+    "new_training_optimizer_steps": 0,
+    "new_formal_candidate_inference_count": 3,
+    "released_m20_anchor_reinference": false,
+    "alpha1_anchor_reinference": false,
+    "alpha_grid_allowed": false,
+    "module_mask_or_projection_allowed": false,
+    "threshold_search_allowed": false,
+    "weight_or_c00_search_allowed": false,
+    "cross_fold_vector_merge_allowed": false,
+    "optimizer_scheduler_rng_copy_forbidden": true,
+    "temporal_memory_metadata_source": "released_m20",
+    "strict_cpu_model_load_required": true,
+    "alpha_zero_parent_bitwise_identity_required": true,
+    "alpha130_independent_formula_bitwise_required": true
+  },
+  "alpha1_train_only_evidence": {
+    "protocol": {"workspace_relative_path": "EVC-work/protocols/metric_aux_task_arithmetic_h2_grouped_oof_science_v1.json", "sha256": "4586e1e20a501a4b5219c2d5953a6666c1fc0d4ac08da2a7b29d6cea70938266"},
+    "runner": {"workspace_relative_path": "EVC-work/run_metric_aux_task_arithmetic_h2_grouped_oof.py", "sha256": "26dc7b53402afa9681add0448ef9e87c5dc297c6361066512d241bfbe8142e86"},
+    "tests": {"workspace_relative_path": "EVC-work/tests/test_run_metric_aux_task_arithmetic_h2_grouped_oof.py", "sha256": "af980ff1649b5ab8816caa0babd5731a6271ad4b928b82988a4a73ade195de1d"},
+    "command_audit": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/command_audit.json", "sha256": "4792962006d1ca1a08f9fa9409e23074acf177849454c7d8c5429227603fa265"},
+    "synthesis_manifest": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/synthesis/synthesis_manifest.json", "sha256": "c87738e0d9e52945b2e95c05b06749898718482e3ddda65293540e175c701876"},
+    "report": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/grouped_oof_report.json", "sha256": "df4d8d6bf123e75ae1be7f9f53ef03442daf50f9683042fdfd0343356ce5110e"},
+    "observed_fold_score_delta": {
+      "hold_g1": 0.00015539966484023893,
+      "hold_g2": 0.0003616687011411823,
+      "hold_g3": 0.00021067229526383624
+    },
+    "observed_pooled_score_delta": 0.00026593508401728805,
+    "observed_pooled_count_delta": {"true_positive_events": -5, "false_positive_events": -51, "false_components": -19},
+    "local_linear_alpha130_score_delta_projection_not_a_result": {
+      "hold_g1": 0.0002020195642923106,
+      "hold_g2": 0.000470169311483537,
+      "hold_g3": 0.000273873983843,
+      "pooled": 0.0003457156092224745
+    }
+  },
+  "anchor_sufficient_count_artifacts": {
+    "released_m20": {
+      "hold_g1": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g1_released_m20/evaluation.json", "sha256": "eee7dba767f7bab788079d89bfbe11adbe986031e6e3e066d01c3a9622ce3d8b"},
+      "hold_g2": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g2_released_m20/evaluation.json", "sha256": "e8b007058f3c6247131429f24dd3d852882c205f31d1a246a134ba8a540766ae"},
+      "hold_g3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v4/held_train_evaluation/hold_g3_released_m20/evaluation.json", "sha256": "f4a93593afad3f3e06fb692e8b8638979ab502cd33c7e71b5e9f90373a80af1a"}
+    },
+    "alpha1": {
+      "hold_g1": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/held_train_evaluation/hold_g1_isolated_metric_aux/evaluation.json", "sha256": "f2204b26599ebdf67b38d7f4b27194ff56f5cd85d6978f85289cefe86a80086b"},
+      "hold_g2": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/held_train_evaluation/hold_g2_isolated_metric_aux/evaluation.json", "sha256": "b3fe82529259e89a98b809806b5add6438b9b504171958f23e0e0f7ba998b22c"},
+      "hold_g3": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_h2_grouped_oof_v1/held_train_evaluation/hold_g3_isolated_metric_aux/evaluation.json", "sha256": "47aa1add5a8ada2be70d0777b3754d9924149fe216525efe9c13d8e6ac0c28b8"}
+    }
+  },
+  "input_checkpoint_contract": {
+    "released_m20": {"workspace_relative_path": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt", "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849"},
+    "model_state_dict": {"ordered_key_count": 89, "element_count": 1924716, "dtype_each": "torch.float32", "name_shape_canonical_sha256": "3bbe7100b5be460eeeea5218cccfb27d9ed697e449d5a3abe1babf918023f05e"},
+    "fold_pairs": {
+      "hold_g1": {
+        "optimizer_steps_each_arm": 168,
+        "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_baseline/model/runs/20260810-220213_seed49_pid39964/epoch_003_seed49.pt", "sha256": "752172260f19ab4ef78b601f3ed62a6d5136db779f004e7b4cd7ba2c1ce2882a"},
+        "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g1_metric_aux/model/runs/20260810-220332_seed49_pid41824/epoch_003_seed49.pt", "sha256": "59fb7b0c92294b6225c4e575a4aa7fa0977761eb3a1b14cf676a5b79be117b12"}
+      },
+      "hold_g2": {
+        "optimizer_steps_each_arm": 192,
+        "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_baseline/model/runs/20260810-220450_seed49_pid50852/epoch_003_seed49.pt", "sha256": "258f1ad67ebd6c7108b186b8aad3dfc49d18368c110607468fad6a618fba0955"},
+        "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g2_metric_aux/model/runs/20260810-220617_seed49_pid47452/epoch_003_seed49.pt", "sha256": "14a8956e8e50d281ed6deb642cae27d3026130597ac4ea05c348e10523f81da3"}
+      },
+      "hold_g3": {
+        "optimizer_steps_each_arm": 168,
+        "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_baseline/model/runs/20260810-220746_seed49_pid47268/epoch_003_seed49.pt", "sha256": "fb767a29bb2c7fc32075a9d8ece2e5ff2c2ae2297da1e465c858ab81dccee19e"},
+        "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v3/formal_training/hold_g3_metric_aux/model/runs/20260810-220902_seed49_pid40704/epoch_003_seed49.pt", "sha256": "6e59d216cc9ef3a8dfb49b0778cde9aa56d8b6bb4052f09fb6ba94aeabb72297"}
+      }
+    },
+    "all11_pair": {
+      "optimizer_steps_each_arm": 264,
+      "baseline_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_all11_final_refit_v1/paired_training/all11_baseline/model/runs/20260810-235449_seed49_pid8036/epoch_003_seed49.pt", "sha256": "b64654cd7b742cf161b0e1d164074a99391ee4cce6b748218d4586b032613717"},
+      "metric_aux_e3": {"workspace_relative_path": "experiments/20260810_metric_aux_task_arithmetic_all11_final_refit_v1/paired_training/all11_metric_aux/model/runs/20260810-235657_seed49_pid39052/epoch_003_seed49.pt", "sha256": "f721c5c06d69fe72e41562b89144f21f774d7b96224a7dc6ef9db6d948424bd3"}
+    }
+  },
+  "all11_geometry_evidence": {
+    "protocol": {"workspace_relative_path": "EVC-work/protocols/metric_aux_task_arithmetic_all11_final_refit_science_v2.json", "sha256": "e6493681b4265620966fb1a6ea400de69a3926ab71c9a0c493f82824922cbe92"},
+    "runner": {"workspace_relative_path": "EVC-work/run_metric_aux_task_arithmetic_all11_final_refit_v2.py", "sha256": "c5703b194ee51985593a919c66c72c9ca9f48f02bf1d6820c4745fda2cf4b43a"},
+    "tests": {"workspace_relative_path": "EVC-work/tests/test_run_metric_aux_task_arithmetic_all11_final_refit_v2.py", "sha256": "b133b35309a45938c19481fa934fc5c2813e327f739fd32e5db6b4754d07e2dc"},
+    "command_audit": {"workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/command_audit.json", "sha256": "882954a4671d29bdbfff99ad12293ed6be12408e761ef45bfeb9cc4f88a4b821"},
+    "pair_audit": {"workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/pair_audit.json", "sha256": "c3c53857a451f9f9df2ea9caa0df4f023fe4c78647009594b054a861c3f44c19"},
+    "alpha1_checkpoint": {"workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/synthesis/metric_aux_task_arithmetic_all11_alpha1.pt", "sha256": "614999c09f82ec1911620ee35dae3f1f6362cb92d59a82e2e539e9b2ad2432ee"},
+    "synthesis_manifest": {"workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_all11_final_refit_v2/synthesis/synthesis_manifest.json", "sha256": "7c23283720b046760463d91a4e68137803bcb448425d5ed88961b72f2a23caa1"},
+    "alpha1_task_l2": 0.0017218260875094711,
+    "applied_geometry_basis": "final_float32_candidate_minus_released_m20_independently_recomputed_after_the_single_float64_to_float32_cast",
+    "module_energy_share_basis": "raw_float64_all11_task_vector_scale_invariant",
+    "alpha130_applied_l2": 0.00223837530295583,
+    "alpha130_step_normalized_l2": 0.00013776247670607437,
+    "alpha130_task_over_m20": 0.000043065093592031296,
+    "alpha130_max_abs": 0.000012271106243133545,
+    "changed_tensor_count": 85,
+    "cosine_with_fold_tasks": {"hold_g1": 0.7800724766038929, "hold_g2": 0.9737347776749867, "hold_g3": 0.9617728287955133},
+    "module_energy_share": {"base": 0.6018172489539562, "forward_memory": 0.191199614347187, "backward_memory": 0.16027974536016149, "memory_projection": 0.017747337752849604, "temporal_attn": 0.028956053585846016}
+  },
+  "geometry_gates": {
+    "alpha130_step_normalized_l2_inclusive_bounds": [0.0001082020222400436, 0.00015832719771568055],
+    "alpha130_task_over_m20_maximum": 0.000049493706492641645,
+    "alpha130_max_abs_maximum": 0.00001497175544500351,
+    "changed_tensor_count_exact": 85,
+    "cosine_with_each_fold_task_minimum": 0.6549000554789978,
+    "module_energy_share_bounds": {
+      "base": [0.5743051517987959, 0.7006714473113899],
+      "forward_memory": [0.1730281851545295, 0.19545774170976662],
+      "backward_memory": [0.06156420613175284, 0.18796657349690146],
+      "memory_projection": [0.014585931422667458, 0.03217205205909964],
+      "temporal_attn": [0.025673391705420285, 0.03256410934322828]
+    }
+  },
+  "held_train_inference_contract": {
+    "dataset_split": "train",
+    "fold_order": ["hold_g1", "hold_g2", "hold_g3"],
+    "held_source_names": {
+      "hold_g1": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz"],
+      "hold_g2": ["train_092.npz", "train_093.npz", "train_094.npz"],
+      "hold_g3": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+    },
+    "prediction_threshold": 0.719,
+    "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "new_alpha130_candidate_must_run_formal_checkpoint_inference": true,
+    "sufficient_counts_and_metrics_must_recompute_from_per_source_records": true,
+    "m20_and_alpha1_sufficient_counts_must_be_reused_without_reinference": true,
+    "t32_allowed": false
+  },
+  "dual_anchor_overshoot_gates": {
+    "each_fold_against_released_m20": {
+      "score_not_lower": true,
+      "pd_not_lower": true,
+      "iou_not_lower": true,
+      "fa_not_higher": true,
+      "correct_objects_not_lower": true,
+      "population_invariants_equal": true,
+      "false_positive_events_or_false_components_strictly_lower": true
+    },
+    "each_fold_against_alpha1": {
+      "score_not_lower": true,
+      "pd_not_lower": true,
+      "iou_not_lower": true,
+      "fa_not_higher": true,
+      "correct_objects_not_lower": true,
+      "raw_true_positive_events_not_lower": true,
+      "population_invariants_equal": true
+    },
+    "pooled": {
+      "score_delta_vs_m20_at_least": 0.00032,
+      "score_delta_vs_alpha1_at_least": 0.00005,
+      "pd_iou_fa_and_correct_objects_not_worse_than_both_anchors": true,
+      "raw_true_positive_events_not_lower_than_alpha1": true,
+      "false_positive_events_or_false_components_strictly_lower_than_m20": true,
+      "false_positive_events_or_false_components_strictly_lower_than_alpha1": true,
+      "population_invariants_equal_to_both_anchors": true
+    },
+    "all_required": true
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260811_metric_aux_task_arithmetic_alpha130_h2_grouped_oof_v1",
+    "command_audit": "command_audit.json",
+    "synthesis_manifest": "synthesis/synthesis_manifest.json",
+    "candidate_checkpoint_pattern": "synthesis/{fold_id}/isolated_metric_aux_alpha130.pt",
+    "evaluation_pattern": "held_train_evaluation/{fold_id}_alpha130/evaluation.json",
+    "report": "grouped_oof_report.json",
+    "no_clobber": true,
+    "default_submission_or_validation_change_allowed": false
+  },
+  "cli_contract": {
+    "allowed_commands": ["audit", "synthesize", "evaluate", "report", "all-evaluate-report"],
+    "evaluate_requires_root_gpu_authorization": true,
+    "train_probe_alpha_grid_threshold_search_commands_exposed": false
+  },
+  "validation_or_test_read_allowed": false,
+  "current_failed_validation_report_read_allowed": false,
+  "persistence_formal_artifact_read_allowed": false,
+  "new_training_allowed": false,
+  "platform_submission_allowed": false
+}

@@ -1,0 +1,173 @@
+{
+  "schema": "ev-uav-temporal-memory-metric-aux-h2-grouped-oof-recovery-v2",
+  "created_utc": "2026-08-10T13:06:28Z",
+  "status": "frozen_before_any_v2_probe_formal_training_or_held_evaluation",
+  "experiment_id": "metric_aux_component_hard_negative_m23_fixed_h2_oof_v2",
+  "evidence_class": "fresh_numeric_near_identity_recovery_probe_then_single_candidate_paired_three_fold_train_only_h2_grouped_oof",
+  "inheritance": {
+    "entire_scientific_definition_inherited": true,
+    "base_science_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/metric_aux_h2_grouped_oof_science_v1.json",
+      "sha256": "d30d0e45c85ee2f1a8b3c9533ed85f7c5525a421e252d7c1ad2d635fa804aa2b"
+    },
+    "base_runner": {
+      "workspace_relative_path": "EVC-work/run_metric_aux_h2_grouped_oof.py",
+      "sha256": "9b3f58a8ed4676e78bf75b3daaf33e96b7218f752088e4e7726da7dbeaa3cf5a"
+    },
+    "base_command_audit": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v1/command_audit.json",
+      "sha256": "ffbd79888f96666a04b69154e150d342acb836c8b577300fe5a55bf963f49fe6"
+    },
+    "attempt1_failure_receipt": {
+      "workspace_relative_path": "experiments/20260810_metric_aux_h2_grouped_oof_v1/resource_probe/probe_failure.json",
+      "sha256": "88eb445f9dc9252e452e4a7ede26921b7fe319479f2b382e9aaa699541ee88c7"
+    }
+  },
+  "recovery_amendment": {
+    "reason": "Attempt 1 correctly failed an overstrict cross-process CUDA bitwise E1 identity gate even though epoch-0 auxiliary losses, source order, commands, scheduler and RNG were exact and the observed model/loss differences were at FP32 numerical-noise scale.",
+    "selection_timing": "Thresholds frozen after read-only diagnosis of failed attempt 1 and before a fresh v2 probe; attempt 1 remains failed and cannot be retroactively promoted.",
+    "no_held_metric_or_validation_selection": true,
+    "fresh_v2_probe_required": true,
+    "attempt1_checkpoint_reuse_as_v2_pass_forbidden": true,
+    "scientific_candidate_or_training_change": false,
+    "changed_contract_only": "paired numerical-identity audit",
+    "non_posthoc_overfit_controls": [
+      "Use round order-of-magnitude FP32 tolerances rather than values fitted to individual tensors.",
+      "Require a completely fresh paired two-epoch v2 probe in a new output directory.",
+      "Apply the same frozen E1 tolerances to every later formal fold pair.",
+      "Require exact structure, commands, source order, epoch-0 aux zeros, scheduler and RNG.",
+      "Require post-warmup E2 treatment signal to exceed the measured E1 numerical floor by at least 10x."
+    ]
+  },
+  "historical_m23_sampling_audit": {
+    "run_summary": {
+      "workspace_relative_path": "experiments/20260810_m23_metric_seed49/model/runs/20260810-014909_seed49_pid35620/run_summary.json",
+      "sha256": "211a657bead2d641a61b09d2df79f9ffb9c9e3a75d7b5218188a34798bbea463"
+    },
+    "training_log": {
+      "workspace_relative_path": "experiments/20260810_m23_metric_seed49/training.log",
+      "sha256": "2454c6b0990ca7006fd0246c160b4c95892445feef6fb5a333f16f24da055e64"
+    },
+    "training_log_encoding": "utf-16",
+    "source_video_count": 99,
+    "sequence_count_per_epoch": 408,
+    "dense_video_count_over_200k": 15,
+    "h2_dense_video_count": 11,
+    "non_h2_dense_video_count": 4,
+    "non_dense_video_count": 84,
+    "base_views_per_video": 2,
+    "dense_view_multiplier": 8,
+    "h2_dense_sequences_per_epoch": 176,
+    "non_h2_dense_sequences_per_epoch": 64,
+    "non_dense_sequences_per_epoch": 168,
+    "epochs": 4,
+    "optimizer_steps_total": 1632,
+    "expected_resolved_config": {
+      "TRAIN": {
+        "seed": 49,
+        "epochs": 4,
+        "batch_size": 1,
+        "lr": 0.0000005,
+        "scheduler": "cosine",
+        "scheduler_min_lr": 0.00000005
+      },
+      "TEMPORAL_MEMORY": {
+        "temporal_memory_enabled": true,
+        "temporal_memory_width": 16,
+        "temporal_memory_sequence_length": 16,
+        "temporal_memory_train_views_per_video": 2,
+        "temporal_memory_dense_sampling_enabled": true,
+        "temporal_memory_dense_event_count_cutoff": 200000,
+        "temporal_memory_dense_view_multiplier": 8,
+        "temporal_memory_density_bucket_boundaries": [],
+        "temporal_memory_density_bucket_views": [],
+        "temporal_memory_metric_aux_enabled": true,
+        "temporal_memory_metric_target_weight": 0.005,
+        "temporal_memory_metric_component_weight": 0.001,
+        "temporal_memory_metric_warmup_epochs": 1,
+        "temporal_memory_metric_spatial_cell_size": 3,
+        "temporal_memory_metric_min_cell_events": 2,
+        "temporal_memory_metric_component_ratio": 0.01,
+        "temporal_memory_metric_activation_threshold": 0.719,
+        "temporal_memory_metric_activation_temperature": 0.1
+      }
+    },
+    "required_training_log_lines": {
+      "video_count": "training videos: 99",
+      "sequence_count": "training sequences per epoch: 408",
+      "dense_sampling": "dense sequence sampling: enabled=True, cutoff=200000, multiplier=8, dense_videos=15, extra_views=210"
+    },
+    "disclosure": "M23 was a 99-video mixed-population run. V2 OOF remains H2-only with uniform eight-view sampling and reuses only M23 loss hyperparameters, not its population or sampling schedule."
+  },
+  "numeric_near_identity_contract": {
+    "model_metric_definition": {
+      "tensor_population": "all sorted model_state_dict tensors after exact key, shape and dtype equality",
+      "accumulation_dtype": "float64",
+      "max_abs": "maximum absolute elementwise candidate-minus-baseline difference",
+      "global_l2": "sqrt(sum of squared elementwise differences across every model tensor)",
+      "relative_l2": "global_l2 divided by sqrt(sum of squared baseline elements); zero denominator fails"
+    },
+    "optimizer_metric_definition": {
+      "exact_fields": ["optimizer class", "state key set", "param_groups", "non-floating state including step"],
+      "numeric_tensor_population": "all floating optimizer state tensors under the exact common state/key structure",
+      "accumulation_dtype": "float64",
+      "max_abs": "maximum absolute elementwise difference across floating optimizer state tensors",
+      "global_l2": "sqrt(sum of squared differences across floating optimizer state tensors)"
+    },
+    "optimizer_step_contract": {
+      "optimizer_param_group_parameter_count": 89,
+      "optimizer_state_entry_count": 89,
+      "every_state_step_tensor_finite_integer_and_equal": true,
+      "probe_e1_step": 8,
+      "probe_e2_step": 16,
+      "formal_e1_step": "fit_video_count * 8",
+      "formal_e2_step": "fit_video_count * 8 * 2",
+      "formal_e3_step": "fit_video_count * 8 * 3"
+    },
+    "e1_zero_based_epoch0": {
+      "model_max_abs_maximum": 0.000001,
+      "model_relative_l2_maximum": 0.0000001,
+      "optimizer_max_abs_maximum": 0.00001,
+      "optimizer_global_l2_maximum": 0.0001,
+      "epoch_loss_abs_delta_maximum": 0.0000001,
+      "model_structure_exact": true,
+      "optimizer_structure_and_nonfloating_state_exact": true,
+      "scheduler_state_exact": true,
+      "rng_state_exact": true,
+      "source_names_order_and_sha256_exact": true,
+      "resolved_command_difference_allowlist_exact": true,
+      "baseline_and_candidate_target_aux_exact_zero": true,
+      "baseline_and_candidate_component_aux_exact_zero": true
+    },
+    "e2_zero_based_epoch1": {
+      "candidate_model_global_l2_over_e1_numerical_floor_minimum": 10.0,
+      "candidate_model_global_l2_strictly_positive": true,
+      "model_structure_exact": true,
+      "scheduler_state_exact": true,
+      "rng_state_exact": true,
+      "candidate_target_aux_raw_and_weighted_finite_positive": true,
+      "candidate_component_aux_raw_and_weighted_finite_positive": true,
+      "candidate_target_group_count_positive": true,
+      "candidate_component_candidate_and_hard_cell_counts_positive": true,
+      "real_epoch1_batch_target_and_component_parameter_gradient_norms_finite_positive": true,
+      "fresh_zero_state_probe_optimizer_update_nonzero": true
+    },
+    "formal_pair_reuse": {
+      "same_e1_numeric_near_identity_limits_required_for_all_three_fold_pairs": true,
+      "same_e2_signal_to_e1_floor_minimum_required_for_all_three_fold_pairs": true,
+      "all_original_scientific_and_promotion_gates_inherited": true
+    }
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260810_metric_aux_h2_grouped_oof_v2",
+    "v1_outputs_read_only": true,
+    "no_clobber": true,
+    "new_paired_probe_optimizer_steps": 32,
+    "formal_gpu_requires_fresh_v2_probe_pass": true
+  },
+  "claim_scope": "incremental_finetune_transfer_not_fold_clean_model_generalization",
+  "shared_parent_pretraining_exposure": true,
+  "validation_or_test_read_allowed": false,
+  "t32_allowed": false,
+  "platform_submission_allowed": false
+}

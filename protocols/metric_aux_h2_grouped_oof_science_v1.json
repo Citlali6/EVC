@@ -1,0 +1,290 @@
+{
+  "schema": "ev-uav-temporal-memory-metric-aux-h2-grouped-oof-science-v1",
+  "created_utc": "2026-08-10T12:17:42.2488359Z",
+  "status": "frozen_before_any_probe_formal_training_or_held_evaluation",
+  "experiment_id": "metric_aux_component_hard_negative_m23_fixed_h2_oof_v1",
+  "evidence_class": "single_candidate_paired_three_fold_train_only_h2_grouped_oof",
+  "audit_amendment": {
+    "revision_reason": "The released M20 initialization was itself trained on all eleven H2 sources, so held-fold language must be limited to the incremental E3 fine-tune treatment rather than the complete model history.",
+    "shared_parent_pretraining_exposure": true,
+    "claim_scope": "incremental_finetune_transfer_not_fold_clean_model_generalization",
+    "paired_causal_scope": "Within the shared released-M20 condition, isolate the incremental effect of enabling the frozen metric auxiliary loss during the paired E3 fine-tune.",
+    "fold_clean_parent_retraining_required": false
+  },
+  "revision_history": [
+    {
+      "prior_sha256": "08585dd2803f3b8f8572d9e79f0e4a3250bce7509f4dfc80d0f0f70a838c4f0e",
+      "reason": "Locked the audited full-training scope, real auxiliary-loss/count gates, immutable C00 overrides, and held-only pooling contract before GPU use."
+    },
+    {
+      "prior_sha256": "eaaea0d1f3c21568cca9028c9ae6c45861b27299ee5bcfa96a6829f06e3c4248",
+      "reason": "Added the shared released-M20 pretraining exposure amendment and restricted the scientific claim to incremental fine-tune transfer."
+    }
+  ],
+  "hypothesis": "The historically fixed M23 temporal-memory metric auxiliary configuration, with its explicit one-epoch warmup, reduces full-stream C00 H2 false positives and false components without reducing target evidence.",
+  "split_access": {
+    "allowed_label_split": "train",
+    "validation_or_test_read_allowed": false,
+    "prior_persistence_formal_artifact_read_allowed": false,
+    "platform_submission_allowed": false
+  },
+  "history_audit": {
+    "training_run_summary_count_checked": 22,
+    "explicit_metric_aux_false_count": 21,
+    "explicit_metric_aux_true_count": 1,
+    "contradicts_no_prior_enabled_summary_premise": true,
+    "prior_enabled_summary": {
+      "workspace_relative_path": "experiments/20260810_m23_metric_seed49/model/runs/20260810-014909_seed49_pid35620/run_summary.json",
+      "sha256": "211a657bead2d641a61b09d2df79f9ffb9c9e3a75d7b5218188a34798bbea463",
+      "epochs": 4,
+      "seed": 49,
+      "metric_target_weight": 0.005,
+      "metric_component_weight": 0.001,
+      "metric_warmup_epochs": 1,
+      "limitations": "Single non-grouped run; no per-epoch auxiliary activation statistics or held-train grouped estimate."
+    },
+    "base_config_defaults": {
+      "metric_aux_enabled": false,
+      "metric_target_weight": 0.01,
+      "metric_component_weight": 0.002,
+      "metric_warmup_epochs": 5,
+      "metric_spatial_cell_size": 3,
+      "metric_min_cell_events": 2,
+      "metric_component_ratio": 0.01,
+      "metric_activation_threshold": 0.7,
+      "metric_activation_temperature": 0.1
+    },
+    "warmup_semantics": "The loss executes when zero-based epoch >= metric_warmup_epochs; default warmup=5 therefore never executes in an E3 run whose epochs are 0,1,2."
+  },
+  "repository": {
+    "workspace_relative_root": "EVC-work",
+    "core_files": [
+      {"path": "configs/evisseg_evuav.yaml", "sha256": "c4157f6e04fb96be1fe9bef6ed87004b1e7da0d72507a43091e9f929345f2ec9"},
+      {"path": "train_temporal_memory.py", "sha256": "69059e6de177de6e8839ed588386f59c7786b065320be707415d3679d6153b86"},
+      {"path": "utils/component_hard_negative.py", "sha256": "29985c6aa9c7d8076d62f88795b873f27866aafc75425c8dba958c179828a4f1"},
+      {"path": "dataset/temporal_memory.py", "sha256": "f00ccd6e9d0c3b92c9796e835acd07ac25b04ae80135b93fade25abc352c4c66"},
+      {"path": "dataset/temporal_frame.py", "sha256": "1f6bed24ebdbae671459028d8f2ff37f179dea9bb2ef23191d45c9e010ac83ee"},
+      {"path": "utils/temporal_frame_loss.py", "sha256": "723c10d581b40191105dbce58ca1596523d044995cd199e05a51fcb375b2ef44"},
+      {"path": "model/temporal_memory_net.py", "sha256": "d90c550bc2928482684c1216f52c4752700c27b79935a9552208bc2bca00f32f"},
+      {"path": "utils/temporal_memory_inference.py", "sha256": "8b388094b1cf4504db5f823a5de6cc4d41793f69b1cf8822e16bb10eb59a9610"},
+      {"path": "utils/postprocess.py", "sha256": "a43e2a22947f5307cdb01b810a4f1dc8d4fb624b14bd068baf1e9087ca5d1aa4"},
+      {"path": "utils/eval.py", "sha256": "cb9de56b54a7153d80a2fd32432188665e830e0a9b945965f2cbd6765bb354e5"},
+      {"path": "utils/challenge_eval.py", "sha256": "a09e9a4b74abb06864e4551778addd624e53654041c98a41dbe61a1f67fbc952"},
+      {"path": "crossfit_component_reranker.py", "sha256": "ec4d0af1abf8dab88037d8731ad1b142aa8cdb76511287d866113865d70e9561"},
+      {"path": "train_component_reranker.py", "sha256": "4cd17f1778fd81de99fb053f038268bcf0e45e53ff80cbd3638f9c28f7bac44d"},
+      {"path": "replay_temporal_memory_validation.py", "sha256": "a3c8ab4966663bd9e67416ae7b16b9a9c5abdcccbaa3e7e2f93f9b21a6a1dbdd"}
+    ]
+  },
+  "runtime_contract": {
+    "python_version": "3.9.25",
+    "torch_version": "2.5.1+cu121",
+    "numpy_version": "1.26.4",
+    "platform": "Windows-10-10.0.26100-SP0",
+    "gpu_name": "NVIDIA GeForce RTX 4060 Laptop GPU"
+  },
+  "parent_checkpoint": {
+    "workspace_relative_path": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+    "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "sequence_length": 16,
+    "role": "identical initialization for every baseline and candidate run"
+  },
+  "dataset": {
+    "workspace_relative_train_root": "datasets/EV-UAV-Challenge2/train",
+    "source_union_count": 11,
+    "source_groups": {
+      "g1_088_091": [
+        {"name": "train_088.npz", "size": 6209499, "sha256": "29d5bbc31d23b38a91d349896a530b2d416224db4b464b1ae45c355b94b1ec10", "event_count": 399750, "positive_event_count": 5538},
+        {"name": "train_089.npz", "size": 6292894, "sha256": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb", "event_count": 405722, "positive_event_count": 2681},
+        {"name": "train_090.npz", "size": 6537515, "sha256": "5de16df85ee466b7ee1d8ecbf465a8cbfe64d2029b7b7a895cc181ca75559102", "event_count": 422448, "positive_event_count": 2585},
+        {"name": "train_091.npz", "size": 6578984, "sha256": "7314cdd6627d9bf538656abc7e098b8fd21e79038591e5a941187844eb7aed7e", "event_count": 423790, "positive_event_count": 3299}
+      ],
+      "g2_092_094": [
+        {"name": "train_092.npz", "size": 9116674, "sha256": "9b8707627ac1bbcd471bbff7fc9b02fafbe5c6dd0f54857dbb158fb8916eeca6", "event_count": 595519, "positive_event_count": 7192},
+        {"name": "train_093.npz", "size": 9505066, "sha256": "460e45e7bc5d3df8a1a1dbd8a19427c95d130937ec3e4912c2dda3f693456338", "event_count": 620778, "positive_event_count": 6137},
+        {"name": "train_094.npz", "size": 9427855, "sha256": "8c5f985c75abeac73cc87e3419deb461ba508fc16fe1411b98b4f70f15458eec", "event_count": 614725, "positive_event_count": 6475}
+      ],
+      "g3_095_098": [
+        {"name": "train_095.npz", "size": 5636849, "sha256": "b86e9b764b3bd9e151d9657a4a0b5c3255e0296882c3b367131f31443bf2eeb3", "event_count": 365730, "positive_event_count": 2387},
+        {"name": "train_096.npz", "size": 9557825, "sha256": "7c136b7dbb8ad85ddc43c50ef2886c062ac9ab7e9927951ecc6c67e7ea397a7c", "event_count": 625178, "positive_event_count": 7011},
+        {"name": "train_097.npz", "size": 9495816, "sha256": "3583cd09272702cf1da8caf76f7b802856c41394555b0c990124c08515d16ac5", "event_count": 619767, "positive_event_count": 6330},
+        {"name": "train_098.npz", "size": 9549227, "sha256": "0a60a0dc6f80258ec428f97b30e2be683fd2d35391b0a76801ca4c8a3585ee13", "event_count": 624246, "positive_event_count": 4557}
+      ]
+    },
+    "folds": [
+      {"fold_id": "hold_g1", "fit_groups": ["g2_092_094", "g3_095_098"], "held_group": "g1_088_091", "fit_video_count": 7, "held_video_count": 4, "expected_optimizer_steps_per_run": 168},
+      {"fold_id": "hold_g2", "fit_groups": ["g1_088_091", "g3_095_098"], "held_group": "g2_092_094", "fit_video_count": 8, "held_video_count": 3, "expected_optimizer_steps_per_run": 192},
+      {"fold_id": "hold_g3", "fit_groups": ["g1_088_091", "g2_092_094"], "held_group": "g3_095_098", "fit_video_count": 7, "held_video_count": 4, "expected_optimizer_steps_per_run": 168}
+    ]
+  },
+  "training": {
+    "paired_variants": ["baseline", "metric_aux"],
+    "training_scope": "full_temporal_memory_from_m20",
+    "training_scope_audit": {
+      "name": "full",
+      "trainable_state_tensor_count": 89,
+      "trainable_parameter_count": 1924716,
+      "frozen_parameter_count": 0,
+      "trainable_name_shape_canonical_sha256": "3bbe7100b5be460eeeea5218cccfb27d9ed697e449d5a3abe1babf918023f05e",
+      "narrow_scope_switches": {
+        "temporal_memory_confidence_only_enabled": false,
+        "temporal_memory_freeze_base_enabled": false,
+        "temporal_memory_head_only_enabled": false,
+        "temporal_memory_dacc_v2_only_enabled": false,
+        "temporal_memory_attention_projection_only_enabled": false
+      }
+    },
+    "seed": 49,
+    "epochs": 3,
+    "sequence_length": 16,
+    "views_per_video": 8,
+    "sampling_contract": {
+      "historical_m23": "base views_per_video=2 with dense_sampling_multiplier=8, hence 16 H2 views per video",
+      "current_grouped_oof": "uniform 8 views per fit video with dense sampling disabled",
+      "reuse_scope": "Only the pre-existing M23 loss hyperparameters are reused; this is not an exact replication of the M23 training run or its 16-view sampling schedule.",
+      "fixed_budget_prior": "Eight uniform views were fixed before any held-fold result to keep the six-run grouped OOF budget at 1056 optimizer steps and align with the existing grouped-OOF training budget."
+    },
+    "batch_size": 1,
+    "learning_rate": 0.0000005,
+    "scheduler": "cosine",
+    "scheduler_min_lr": 0.00000005,
+    "checkpoint_selection": "epoch_003_seed49.pt only",
+    "baseline_metric_aux_enabled": false,
+    "candidate": {
+      "metric_aux_enabled": true,
+      "metric_target_weight": 0.005,
+      "metric_component_weight": 0.001,
+      "metric_warmup_epochs": 1,
+      "active_zero_based_epochs": [1, 2],
+      "metric_spatial_cell_size": 3,
+      "metric_min_cell_events": 2,
+      "metric_component_ratio": 0.01,
+      "metric_activation_threshold": 0.719,
+      "metric_activation_temperature": 0.1,
+      "selection_basis": "Reuse of the loss hyperparameters from the only pre-existing train-only enabled M23 configuration before these grouped folds; avoids inventing or comparing the doubled base-config default weights after defining the new OOF.",
+      "target_protection_reason": "The historical M23 target-frame term is retained to protect TP, correct-target and Pd gates while the component term suppresses hard-negative cells."
+    },
+    "no_parameter_grid": true,
+    "paired_difference_allowlist": [
+      "TRAIN.model_save_root",
+      "TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled"
+    ],
+    "formal_optimizer_steps_total": 1056,
+    "formal_training_audit_gates": {
+      "every_run_uses_fresh_process": true,
+      "fit_view_members_exact_and_held_sources_absent": true,
+      "resolved_config_matches_frozen_overrides": true,
+      "optimizer_steps_match_fold_contract": true,
+      "each_pair_e1_model_state_bitwise_equal": true,
+      "each_pair_e1_optimizer_scheduler_rng_state_bitwise_equal": true,
+      "candidate_epoch0_raw_target_and_component_aux_exact_zero": true,
+      "candidate_epochs1_and2_raw_target_and_component_aux_finite_and_nonzero": true,
+      "candidate_epochs1_and2_weighted_target_and_component_aux_finite_and_nonzero": true,
+      "candidate_metric_active_zero_based_epochs_exact": [1, 2],
+      "e2_and_e3_pair_divergence_allowed": true
+    }
+  },
+  "resource_probe": {
+    "source": "train_096.npz",
+    "paired_variants": ["baseline", "metric_aux"],
+    "epochs": 2,
+    "views_per_video": 8,
+    "expected_optimizer_steps_per_run": 16,
+    "expected_optimizer_steps_total": 32,
+    "reason_for_two_epochs": "Warmup=1 requires epoch 1 so the GPU probe exercises the actual auxiliary losses.",
+    "gates": {
+      "candidate_epoch0_metric_target_loss_exact_zero": true,
+      "candidate_epoch0_metric_component_loss_exact_zero": true,
+      "baseline_candidate_e1_model_state_bitwise_equal": true,
+      "baseline_candidate_e1_optimizer_scheduler_rng_state_bitwise_equal": true,
+      "candidate_epoch1_metric_target_loss_finite": true,
+      "candidate_epoch1_metric_target_loss_positive": true,
+      "candidate_epoch1_metric_component_loss_finite_and_positive": true,
+      "candidate_epoch1_target_group_count_positive": true,
+      "candidate_epoch1_component_candidate_cell_count_positive": true,
+      "candidate_epoch1_component_hard_cell_count_positive": true,
+      "candidate_epoch1_metric_only_gradient_norm_positive": true,
+      "candidate_epoch1_metric_only_optimizer_update_nonzero": true,
+      "baseline_candidate_e2_model_state_not_bitwise_equal": true
+    },
+    "formal_gpu_requires_separate_authorization": true
+  },
+  "evaluation": {
+    "split": "train",
+    "held_stream": "complete full-stream T160",
+    "prediction_threshold": 0.719,
+    "postprocess": "effective C00",
+    "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "t32_allowed": false,
+    "checkpoint": "E3 only",
+    "released_m20_anchor": {
+      "checkpoint_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+      "evaluated_on_the_same_three_held_groups": true,
+      "training_run_required": false
+    },
+    "source_name_routing_allowed": false,
+    "fixed_config_overrides": [
+      "TEST.prediction_threshold=0.719",
+      "TEMPORAL_FRAME.temporal_frame_enabled=false",
+      "TEMPORAL_MEMORY.temporal_memory_enabled=true",
+      "TEMPORAL_MEMORY.temporal_memory_sequence_length=16",
+      "TEMPORAL_MEMORY.temporal_memory_sparse_weight=0.0",
+      "TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true",
+      "POSTPROCESS.p0_enabled=true",
+      "POSTPROCESS.p0_spatial_radius=2",
+      "POSTPROCESS.p0_temporal_bin_size=50",
+      "POSTPROCESS.p0_temporal_radius_bins=1",
+      "POSTPROCESS.p0_min_cluster_events=3",
+      "POSTPROCESS.p0_min_duration_bins=5",
+      "POSTPROCESS.p0c_high_confidence_recovery_enabled=true",
+      "POSTPROCESS.p0c_retain_min_score=0.95",
+      "POSTPROCESS.p0c_density_retain_enabled=false",
+      "POSTPROCESS.p0c_density_event_count_cutoff=100000",
+      "POSTPROCESS.p0c_density_retain_min_score=0.97",
+      "POSTPROCESS.p0b_enabled=false",
+      "POSTPROCESS.p18_score_track_recovery_enabled=true",
+      "POSTPROCESS.p18_event_count_cutoff=1",
+      "POSTPROCESS.p18_max_event_count=35000",
+      "POSTPROCESS.p18_candidate_floor=0.53",
+      "POSTPROCESS.p18_spatial_radius=5",
+      "POSTPROCESS.p18_temporal_bin_size=50",
+      "POSTPROCESS.p18_max_link_distance=8.0",
+      "POSTPROCESS.p18_max_gap_bins=1",
+      "POSTPROCESS.p18_min_track_bins=4",
+      "POSTPROCESS.p18_restore_mode=best",
+      "POSTPROCESS.p18_max_restore_events_per_component=0",
+      "POSTPROCESS.p6_density_threshold_enabled=true",
+      "POSTPROCESS.p6_event_count_cutoff=30000",
+      "POSTPROCESS.p6_low_density_threshold=0.718",
+      "POSTPROCESS.p6_high_density_threshold=0.719"
+    ],
+    "held_pooling_contract": {
+      "held_groups_pairwise_disjoint": true,
+      "held_group_union_video_count": 11,
+      "each_source_held_exactly_once": true,
+      "pooled_counts_use_held_records_only": true
+    }
+  },
+  "promotion_gates": {
+    "comparators": ["paired_baseline_e3", "released_m20"],
+    "against_each_comparator_each_fold_true_positive_events_not_lower": true,
+    "against_each_comparator_each_fold_correct_targets_not_lower": true,
+    "against_each_comparator_each_fold_pd_not_lower": true,
+    "against_each_comparator_each_fold_iou_not_lower": true,
+    "against_each_comparator_each_fold_fa_not_higher": true,
+    "against_each_comparator_each_fold_score_not_lower": true,
+    "against_each_comparator_pooled_score_delta_minimum": 0.0002,
+    "against_each_comparator_pooled_false_positive_events_strictly_lower": true,
+    "against_each_comparator_pooled_false_components_strictly_lower": true,
+    "population_invariants_unchanged": ["positive_events", "object_count", "frame_count", "event_count"],
+    "all_required": true,
+    "failure_action": "archive_without_metric_weight_warmup_or_threshold_search_on_these_folds"
+  },
+  "outputs": {
+    "workspace_relative_directory": "experiments/20260810_metric_aux_h2_grouped_oof_v1",
+    "command_audit": "command_audit.json",
+    "resource_probe": "resource_probe/runtime_result.json",
+    "formal_training_directory": "formal_training",
+    "held_train_evaluation_directory": "held_train_evaluation",
+    "report": "grouped_oof_report.json"
+  }
+}

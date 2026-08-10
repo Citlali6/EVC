@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import io
 import json
 import sys
@@ -139,6 +140,7 @@ def complete_official_records(records):
 def make_payload(
     records,
     checkpoint_sha="a" * 64,
+    checkpoint_path=None,
     complete=True,
     inference_settings=None,
     code_sha256=None,
@@ -151,8 +153,7 @@ def make_payload(
             relative_path: "c" * 64
             for relative_path in replay.CACHE_CODE_PROVENANCE_PATHS
         }
-    return {
-        "metadata": {
+    metadata = {
             "schema": replay.CACHE_SCHEMA,
             "dataset_split": "val",
             "dataset_signature": replay._dataset_signature(records),
@@ -161,9 +162,115 @@ def make_payload(
             "checkpoint_sha256": checkpoint_sha,
             "inference_settings": inference_settings,
             "code_sha256": code_sha256,
-        },
+        }
+    if checkpoint_path is not None:
+        metadata["checkpoint_path"] = str(Path(checkpoint_path).resolve())
+    return {
+        "metadata": metadata,
         "records": records,
     }
+
+
+def make_warm_t32_checkpoint(directory, mutate=None):
+    directory = Path(directory)
+    parent_path = (
+        PROJECT_ROOT
+        / "checkpoints"
+        / "m20_attn_dense_views8_epoch_003_seed48.pt"
+    ).resolve()
+    parent_checkpoint = replay._torch_load_cpu(parent_path)
+    migration = {
+        "name": replay.WARM_ROUTE_MIGRATION_NAME,
+        "source_sequence_length": 16,
+        "target_sequence_length": 32,
+        "metadata_difference_allowlist": ["sequence_length"],
+        "state_dict_strict": True,
+        "parent_checkpoint": str(parent_path),
+        "parent_checkpoint_sha256": replay.RELEASED_M20_SHA256,
+        "source_model_state_sha256": replay.RELEASED_M20_STATE_SHA256,
+        "loaded_model_state_sha256": replay.RELEASED_M20_STATE_SHA256,
+    }
+    model_state = copy.deepcopy(parent_checkpoint["model_state_dict"])
+    model_state["temporal_attn.output_projection.bias"] = (
+        model_state["temporal_attn.output_projection.bias"] + 0.125
+    )
+    checkpoint = {
+        "checkpoint_format_version": 2,
+        "model_state_dict": model_state,
+        "optimizer_state_dict": {},
+        "scheduler_state_dict": {},
+        "rng_state": {},
+        "temporal_memory": {
+            "temporal_bin_size": 50,
+            "context_bins": 5,
+            "width": 16,
+            "sequence_length": 32,
+            "log_count_clip": 4.0,
+            "density_calibration_enabled": True,
+            "density_calibration_version": 1,
+            "trajectory_extrapolation_enabled": False,
+            "confidence_head_enabled": False,
+            "confidence_only_enabled": False,
+            "freeze_base_enabled": False,
+            "head_only_enabled": False,
+            "dacc_v2_only_enabled": False,
+            "attention_projection_only_enabled": True,
+            "init_sequence_length_warm_start_enabled": True,
+            "temporal_attention_enabled": True,
+        },
+        "provenance": {
+            "initialized_from": str(parent_path),
+            "initialized_from_sha256": replay.RELEASED_M20_SHA256,
+            "initialization_migrations": [migration],
+            "resolved_config": {
+                "TEMPORAL_MEMORY": {
+                    "temporal_memory_sequence_length": 32,
+                    "temporal_memory_init_sequence_length_warm_start_enabled": True,
+                    "temporal_memory_attention_projection_only_enabled": True,
+                }
+            },
+            "training_scope": {
+                "name": "temporal_attention_projection_only",
+                "trainable_parameter_count": 9312,
+                "mutable_state_keys": [
+                    "temporal_attn.output_projection.bias",
+                    "temporal_attn.output_projection.weight",
+                ],
+                "frozen_state_reference_sha256": (
+                    replay.RELEASED_M20_FROZEN_STATE_SHA256
+                ),
+            },
+        },
+    }
+    if mutate is not None:
+        mutate(checkpoint)
+    checkpoint_path = directory / "warm-t32.pt"
+    torch.save(checkpoint, checkpoint_path)
+    return checkpoint_path, replay.sha256_file(checkpoint_path)
+
+
+def make_warm_route_payloads(directory, primary_settings=None):
+    directory = Path(directory)
+    primary_checkpoint, primary_sha256 = make_warm_t32_checkpoint(directory)
+    secondary_checkpoint = (
+        PROJECT_ROOT / "checkpoints" / "m10_dense_views2_epoch_002_seed42.pt"
+    ).resolve()
+    if primary_settings is None:
+        primary_settings = dict(DEFAULT_INFERENCE_SETTINGS)
+        primary_settings["temporal_memory_sequence_length"] = 32
+    primary = make_payload(
+        [],
+        checkpoint_sha=primary_sha256,
+        checkpoint_path=primary_checkpoint,
+        inference_settings=primary_settings,
+    )
+    secondary = make_payload(
+        [],
+        checkpoint_sha=replay.RELEASED_M10_SHA256,
+        checkpoint_path=secondary_checkpoint,
+        inference_settings=DEFAULT_INFERENCE_SETTINGS,
+    )
+    return primary, secondary, primary_settings
 
 
 def make_reranker_fixture(directory):
@@ -264,6 +371,272 @@ class ThresholdGridTest(unittest.TestCase):
 
 
 class CacheValidationAndRoutingTest(unittest.TestCase):
+    def test_warm_t32_m10_route_is_explicit_and_uses_fixed_boundary(self):
+        parsed_default = replay.parse_args(
+            [
+                "replay",
+                "--primary-cache",
+                "primary.pt",
+                "--output-json",
+                "result.json",
+                "--output-csv",
+                "result.csv",
+            ]
+        )
+        self.assertFalse(
+            parsed_default.allow_warm_primary_t32_secondary_m10_t16
+        )
+        parsed_enabled = replay.parse_args(
+            [
+                "replay",
+                "--primary-cache",
+                "primary.pt",
+                "--output-json",
+                "result.json",
+                "--output-csv",
+                "result.csv",
+                "--allow-warm-primary-t32-secondary-m10-t16",
+            ]
+        )
+        self.assertTrue(
+            parsed_enabled.allow_warm_primary_t32_secondary_m10_t16
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            primary_template, secondary_template, runtime_settings = (
+                make_warm_route_payloads(temporary_directory)
+            )
+            low_primary = make_record("val_000.npz", [0.1] * 30000)
+            high_primary = make_record("val_001.npz", [0.2] * 30001)
+            low_secondary = make_record("val_000.npz", [0.8] * 30000)
+            high_secondary = make_record("val_001.npz", [0.9] * 30001)
+            primary = make_payload(
+                [low_primary, high_primary],
+                checkpoint_sha=primary_template["metadata"]["checkpoint_sha256"],
+                checkpoint_path=primary_template["metadata"]["checkpoint_path"],
+                inference_settings=runtime_settings,
+            )
+            secondary = make_payload(
+                [low_secondary, high_secondary],
+                checkpoint_sha=replay.RELEASED_M10_SHA256,
+                checkpoint_path=secondary_template["metadata"]["checkpoint_path"],
+                inference_settings=DEFAULT_INFERENCE_SETTINGS,
+            )
+            with self.assertRaisesRegex(ValueError, "inference settings"):
+                replay.route_cache_records(
+                    primary,
+                    secondary,
+                    secondary_max_events=30000,
+                )
+            routed = replay.route_cache_records(
+                primary,
+                secondary,
+                secondary_max_events=30000,
+                allow_warm_primary_t32_secondary_m10_t16=True,
+                runtime_inference_settings=runtime_settings,
+            )
+            by_name = {record.file_name: record for record in routed}
+            self.assertEqual(by_name["val_000.npz"].score_source, "secondary")
+            self.assertEqual(by_name["val_001.npz"].score_source, "primary")
+            self.assertTrue(
+                torch.equal(by_name["val_000.npz"].scores, low_secondary["scores"])
+            )
+            self.assertTrue(
+                torch.equal(by_name["val_001.npz"].scores, high_primary["scores"])
+            )
+
+    def test_warm_t32_m10_route_rejects_every_non_sequence_difference(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            primary, secondary, runtime_settings = make_warm_route_payloads(
+                temporary_directory
+            )
+            changed_primary = copy.deepcopy(primary)
+            changed_runtime = dict(runtime_settings)
+            changed_primary["metadata"]["inference_settings"][
+                "temporal_memory_inference_batch_size"
+            ] = 4
+            changed_runtime["temporal_memory_inference_batch_size"] = 4
+            with self.assertRaisesRegex(ValueError, "may differ only"):
+                replay.route_cache_records(
+                    changed_primary,
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=changed_runtime,
+                )
+
+            wrong_runtime = dict(runtime_settings)
+            wrong_runtime["whole_t"] = 8000
+            with self.assertRaisesRegex(ValueError, "differ from runtime"):
+                replay.route_cache_records(
+                    primary,
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=wrong_runtime,
+                )
+
+            for invalid_cutoff in (29999, 30001):
+                with self.subTest(invalid_cutoff=invalid_cutoff):
+                    with self.assertRaisesRegex(ValueError, "exactly 30000"):
+                        replay.route_cache_records(
+                            primary,
+                            secondary,
+                            secondary_max_events=invalid_cutoff,
+                            allow_warm_primary_t32_secondary_m10_t16=True,
+                            runtime_inference_settings=runtime_settings,
+                        )
+
+            changed_code = copy.deepcopy(secondary)
+            changed_code["metadata"]["code_sha256"][
+                "model/temporal_memory_net.py"
+            ] = "d" * 64
+            with self.assertRaisesRegex(ValueError, "inference code"):
+                replay.route_cache_records(
+                    primary,
+                    changed_code,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+    def test_warm_t32_m10_route_rejects_checkpoint_lineage_tampering(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            primary, secondary, runtime_settings = make_warm_route_payloads(root)
+            primary_checkpoint = replay._torch_load_cpu(
+                Path(primary["metadata"]["checkpoint_path"])
+            )
+
+            def primary_payload_for(checkpoint_payload, name):
+                checkpoint_path = root / name
+                torch.save(checkpoint_payload, checkpoint_path)
+                changed = copy.deepcopy(primary)
+                changed["metadata"]["checkpoint_path"] = str(
+                    checkpoint_path.resolve()
+                )
+                changed["metadata"]["checkpoint_sha256"] = replay.sha256_file(
+                    checkpoint_path
+                )
+                return changed
+
+            primary_checkpoint["provenance"]["initialization_migrations"].append(
+                {"name": "unauthorized_extra_migration"}
+            )
+            tampered_primary = primary_payload_for(
+                primary_checkpoint,
+                "tampered-primary.pt",
+            )
+            with self.assertRaisesRegex(ValueError, "sole initialization"):
+                replay.route_cache_records(
+                    tampered_primary,
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+            wrong_state_lineage = replay._torch_load_cpu(
+                Path(primary["metadata"]["checkpoint_path"])
+            )
+            wrong_state_lineage["provenance"]["initialization_migrations"][0][
+                "source_model_state_sha256"
+            ] = "3" * 64
+            wrong_state_lineage["provenance"]["initialization_migrations"][0][
+                "loaded_model_state_sha256"
+            ] = "3" * 64
+            with self.assertRaisesRegex(ValueError, "inherited state provenance"):
+                replay.route_cache_records(
+                    primary_payload_for(
+                        wrong_state_lineage,
+                        "wrong-state-lineage.pt",
+                    ),
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+            changed_frozen_tensor = replay._torch_load_cpu(
+                Path(primary["metadata"]["checkpoint_path"])
+            )
+            changed_frozen_tensor["model_state_dict"][
+                "memory_projection.bias"
+            ][0] += 1.0
+            with self.assertRaisesRegex(ValueError, "frozen model state"):
+                replay.route_cache_records(
+                    primary_payload_for(
+                        changed_frozen_tensor,
+                        "changed-frozen-tensor.pt",
+                    ),
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+            fake_parent = root / "fake-m20-parent.pt"
+            fake_parent.write_bytes(b"not-released-m20")
+            wrong_parent = replay._torch_load_cpu(
+                Path(primary["metadata"]["checkpoint_path"])
+            )
+            wrong_parent["provenance"]["initialized_from"] = str(fake_parent)
+            wrong_parent["provenance"]["initialization_migrations"][0][
+                "parent_checkpoint"
+            ] = str(fake_parent)
+            with self.assertRaisesRegex(ValueError, "file is not released M20"):
+                replay.route_cache_records(
+                    primary_payload_for(wrong_parent, "wrong-parent.pt"),
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+            incomplete_state = replay._torch_load_cpu(
+                Path(primary["metadata"]["checkpoint_path"])
+            )
+            incomplete_state["model_state_dict"].pop(
+                next(iter(incomplete_state["model_state_dict"]))
+            )
+            with self.assertRaisesRegex(ValueError, "complete 89-key"):
+                replay.route_cache_records(
+                    primary_payload_for(incomplete_state, "incomplete-state.pt"),
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+            fake_m10_path = root / "fake-m10.pt"
+            torch.save({"temporal_memory": {}}, fake_m10_path)
+            fake_secondary = copy.deepcopy(secondary)
+            fake_secondary["metadata"]["checkpoint_path"] = str(
+                fake_m10_path.resolve()
+            )
+            fake_secondary["metadata"]["checkpoint_sha256"] = replay.sha256_file(
+                fake_m10_path
+            )
+            with self.assertRaisesRegex(ValueError, "not released M10"):
+                replay.route_cache_records(
+                    primary,
+                    fake_secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
+            missing_path = copy.deepcopy(primary)
+            missing_path["metadata"].pop("checkpoint_path")
+            with self.assertRaisesRegex(ValueError, "checkpoint path provenance"):
+                replay.route_cache_records(
+                    missing_path,
+                    secondary,
+                    secondary_max_events=30000,
+                    allow_warm_primary_t32_secondary_m10_t16=True,
+                    runtime_inference_settings=runtime_settings,
+                )
+
     def test_secondary_routing_depends_only_on_event_count(self):
         # Suffixes deliberately imply the opposite routing; only event count
         # may select the cached checkpoint.  Canonical stems remain mandatory.

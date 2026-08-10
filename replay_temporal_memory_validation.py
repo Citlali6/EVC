@@ -92,6 +92,30 @@ REPLAY_CODE_PROVENANCE_PATHS = (
 )
 # Backward-compatible name for callers that imported the original constant.
 CODE_PROVENANCE_PATHS = CACHE_CODE_PROVENANCE_PATHS
+WARM_ROUTE_SECONDARY_MAX_EVENTS = 30000
+WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH = 32
+WARM_ROUTE_SECONDARY_SEQUENCE_LENGTH = 16
+WARM_ROUTE_MIGRATION_NAME = (
+    "temporal_memory_sequence_length_t16_to_t32_strict_state"
+)
+RELEASED_M20_SHA256 = (
+    "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849"
+)
+RELEASED_M20_STATE_SHA256 = (
+    "6600662013abae77ba397e45338850b0017b5a99121fcc88a251b67e99122b50"
+)
+RELEASED_M20_FROZEN_STATE_SHA256 = (
+    "78e659e275d7351e040bfd65c89b63459cd6c66f4da5393918fa5f618e9c5190"
+)
+WARM_ROUTE_MUTABLE_STATE_KEYS = frozenset(
+    {
+        "temporal_attn.output_projection.weight",
+        "temporal_attn.output_projection.bias",
+    }
+)
+RELEASED_M10_SHA256 = (
+    "5c89c89a165469c0a4e8286d4644d60d2f82cf5775edbb724f626e24e67d8935"
+)
 
 
 @dataclass(frozen=True)
@@ -568,10 +592,411 @@ def _mapping_differences(left: Mapping, right: Mapping) -> Tuple[str, ...]:
     return tuple(key for key in keys if left.get(key) != right.get(key))
 
 
+def _is_sha256(value) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _frozen_model_state_sha256(
+    state: Mapping,
+    mutable_state_keys: Iterable[str],
+) -> str:
+    """Mirror training's canonical state hash for the immutable tensors."""
+
+    mutable_state_keys = frozenset(mutable_state_keys)
+    digest = hashlib.sha256()
+    for name in sorted(state):
+        if name in mutable_state_keys:
+            continue
+        tensor = torch.as_tensor(state[name]).detach().cpu().contiguous()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(tensor.dtype).encode("ascii"))
+        digest.update(str(tuple(tensor.shape)).encode("ascii"))
+        digest.update(tensor.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return digest.hexdigest()
+
+
+def _require_exact_mapping(
+    actual: Mapping,
+    expected: Mapping,
+    context: str,
+) -> None:
+    if not isinstance(actual, Mapping):
+        raise ValueError("{} must be a mapping.".format(context))
+    differences = tuple(
+        name
+        for name in sorted(set(actual).union(expected))
+        if name not in actual
+        or name not in expected
+        or type(actual[name]) is not type(expected[name])
+        or actual[name] != expected[name]
+    )
+    if differences:
+        raise ValueError(
+            "{} differs: {}.".format(context, ", ".join(differences))
+        )
+
+
+def _load_cache_checkpoint(
+    payload: Mapping,
+    cache_name: str,
+) -> Tuple[Mapping, Path, str]:
+    metadata = payload["metadata"]
+    checkpoint_path_value = metadata.get("checkpoint_path")
+    if not isinstance(checkpoint_path_value, str) or not checkpoint_path_value.strip():
+        raise ValueError(
+            "{} is missing its checkpoint path provenance.".format(cache_name)
+        )
+    checkpoint_path = Path(checkpoint_path_value).expanduser().resolve()
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(
+            "{} checkpoint does not exist: {}".format(cache_name, checkpoint_path)
+        )
+    expected_sha256 = str(metadata.get("checkpoint_sha256", "")).lower()
+    actual_sha256 = sha256_file(checkpoint_path)
+    if actual_sha256 != expected_sha256:
+        raise ValueError(
+            "{} checkpoint SHA-256 does not match its cache metadata.".format(
+                cache_name
+            )
+        )
+    checkpoint = _torch_load_cpu(checkpoint_path)
+    if not isinstance(checkpoint, Mapping):
+        raise ValueError("{} checkpoint payload must be a mapping.".format(cache_name))
+    return checkpoint, checkpoint_path, actual_sha256
+
+
+def _validate_checkpoint_inference_settings(
+    checkpoint_memory: Mapping,
+    inference_settings: Mapping,
+    cache_name: str,
+) -> None:
+    checkpoint_to_inference = {
+        "temporal_bin_size": "temporal_memory_bin_size",
+        "context_bins": "temporal_memory_context_bins",
+        "width": "temporal_memory_width",
+        "sequence_length": "temporal_memory_sequence_length",
+        "log_count_clip": "temporal_memory_log_count_clip",
+    }
+    differences = []
+    for checkpoint_name, inference_name in checkpoint_to_inference.items():
+        if checkpoint_name not in checkpoint_memory or inference_name not in inference_settings:
+            differences.append(inference_name)
+            continue
+        checkpoint_value = checkpoint_memory[checkpoint_name]
+        inference_value = inference_settings[inference_name]
+        if (
+            type(checkpoint_value) is not type(inference_value)
+            or checkpoint_value != inference_value
+        ):
+            differences.append(inference_name)
+    if differences:
+        raise ValueError(
+            "{} checkpoint metadata differs from cached inference settings: {}."
+            .format(cache_name, ", ".join(differences))
+        )
+
+
+def _validate_warm_primary_checkpoint(
+    payload: Mapping,
+) -> dict:
+    checkpoint, checkpoint_path, checkpoint_sha256 = _load_cache_checkpoint(
+        payload, "primary cache"
+    )
+    if checkpoint.get("checkpoint_format_version") != 2:
+        raise ValueError("Warm primary checkpoint must use format version 2.")
+    required_checkpoint_fields = (
+        "model_state_dict",
+        "optimizer_state_dict",
+        "scheduler_state_dict",
+        "rng_state",
+        "temporal_memory",
+        "provenance",
+    )
+    missing_checkpoint_fields = tuple(
+        name for name in required_checkpoint_fields if name not in checkpoint
+    )
+    if missing_checkpoint_fields:
+        raise ValueError(
+            "Warm primary checkpoint is missing fields: {}.".format(
+                ", ".join(missing_checkpoint_fields)
+            )
+        )
+    model_state = checkpoint.get("model_state_dict")
+    if not isinstance(model_state, Mapping) or len(model_state) != 89:
+        raise ValueError(
+            "Warm primary checkpoint must contain the complete 89-key model state."
+        )
+    frozen_state_sha256 = _frozen_model_state_sha256(
+        model_state,
+        WARM_ROUTE_MUTABLE_STATE_KEYS,
+    )
+    if frozen_state_sha256 != RELEASED_M20_FROZEN_STATE_SHA256:
+        raise ValueError(
+            "Warm primary frozen model state does not match released M20."
+        )
+    expected_memory = {
+        "temporal_bin_size": 50,
+        "context_bins": 5,
+        "width": 16,
+        "sequence_length": WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH,
+        "log_count_clip": 4.0,
+        "density_calibration_enabled": True,
+        "density_calibration_version": 1,
+        "trajectory_extrapolation_enabled": False,
+        "confidence_head_enabled": False,
+        "confidence_only_enabled": False,
+        "freeze_base_enabled": False,
+        "head_only_enabled": False,
+        "dacc_v2_only_enabled": False,
+        "attention_projection_only_enabled": True,
+        "init_sequence_length_warm_start_enabled": True,
+        "temporal_attention_enabled": True,
+    }
+    checkpoint_memory = checkpoint.get("temporal_memory")
+    _require_exact_mapping(
+        checkpoint_memory,
+        expected_memory,
+        "Warm primary temporal-memory metadata",
+    )
+    _validate_checkpoint_inference_settings(
+        checkpoint_memory,
+        payload["metadata"]["inference_settings"],
+        "primary cache",
+    )
+
+    provenance = checkpoint.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("Warm primary checkpoint provenance must be a mapping.")
+    initialized_sha256 = str(
+        provenance.get("initialized_from_sha256", "")
+    ).lower()
+    if initialized_sha256 != RELEASED_M20_SHA256:
+        raise ValueError(
+            "Warm primary checkpoint is not initialized from released M20."
+        )
+    migrations = provenance.get("initialization_migrations")
+    if not isinstance(migrations, list) or len(migrations) != 1:
+        raise ValueError(
+            "Warm primary checkpoint must contain one sole initialization migration."
+        )
+    migration = migrations[0]
+    if not isinstance(migration, Mapping):
+        raise ValueError("Warm primary checkpoint migration must be a mapping.")
+    expected_migration = {
+        "name": WARM_ROUTE_MIGRATION_NAME,
+        "source_sequence_length": WARM_ROUTE_SECONDARY_SEQUENCE_LENGTH,
+        "target_sequence_length": WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH,
+        "metadata_difference_allowlist": ["sequence_length"],
+        "state_dict_strict": True,
+    }
+    for name, expected_value in expected_migration.items():
+        if (
+            name not in migration
+            or type(migration[name]) is not type(expected_value)
+            or migration[name] != expected_value
+        ):
+            raise ValueError(
+                "Warm primary checkpoint migration field {} is invalid.".format(name)
+            )
+    migration_parent_sha256 = str(
+        migration.get("parent_checkpoint_sha256", "")
+    ).lower()
+    if migration_parent_sha256 != RELEASED_M20_SHA256:
+        raise ValueError("Warm primary migration parent is not released M20.")
+    initialized_path = provenance.get("initialized_from")
+    migration_parent_path = migration.get("parent_checkpoint")
+    if not isinstance(initialized_path, str) or not initialized_path.strip():
+        raise ValueError("Warm primary initialized-from path is missing.")
+    if not isinstance(migration_parent_path, str):
+        raise ValueError("Warm primary migration parent path is missing.")
+    initialized_path = Path(initialized_path).expanduser().resolve()
+    migration_parent_path = Path(migration_parent_path).expanduser().resolve()
+    if initialized_path != migration_parent_path:
+        raise ValueError("Warm primary parent checkpoint path provenance differs.")
+    if not initialized_path.is_file():
+        raise FileNotFoundError(
+            "Warm primary released M20 parent does not exist: {}".format(
+                initialized_path
+            )
+        )
+    if sha256_file(initialized_path) != RELEASED_M20_SHA256:
+        raise ValueError(
+            "Warm primary parent checkpoint file is not released M20."
+        )
+    source_state_sha256 = str(
+        migration.get("source_model_state_sha256", "")
+    ).lower()
+    loaded_state_sha256 = str(
+        migration.get("loaded_model_state_sha256", "")
+    ).lower()
+    if (
+        not _is_sha256(source_state_sha256)
+        or source_state_sha256 != RELEASED_M20_STATE_SHA256
+        or loaded_state_sha256 != RELEASED_M20_STATE_SHA256
+    ):
+        raise ValueError("Warm primary inherited state provenance is invalid.")
+
+    resolved_config = provenance.get("resolved_config")
+    resolved_temporal_memory = (
+        resolved_config.get("TEMPORAL_MEMORY", {})
+        if isinstance(resolved_config, Mapping)
+        else {}
+    )
+    expected_resolved = {
+        "temporal_memory_sequence_length": WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH,
+        "temporal_memory_init_sequence_length_warm_start_enabled": True,
+        "temporal_memory_attention_projection_only_enabled": True,
+    }
+    for name, expected_value in expected_resolved.items():
+        if (
+            name not in resolved_temporal_memory
+            or type(resolved_temporal_memory[name]) is not type(expected_value)
+            or resolved_temporal_memory[name] != expected_value
+        ):
+            raise ValueError(
+                "Warm primary resolved configuration field {} is invalid.".format(
+                    name
+                )
+            )
+    training_scope = provenance.get("training_scope")
+    expected_mutable_keys = sorted(WARM_ROUTE_MUTABLE_STATE_KEYS)
+    if (
+        not isinstance(training_scope, Mapping)
+        or training_scope.get("name") != "temporal_attention_projection_only"
+        or training_scope.get("trainable_parameter_count") != 9312
+        or training_scope.get("mutable_state_keys") != expected_mutable_keys
+        or str(training_scope.get("frozen_state_reference_sha256", "")).lower()
+        != RELEASED_M20_FROZEN_STATE_SHA256
+    ):
+        raise ValueError("Warm primary training-scope provenance is invalid.")
+    from utils.temporal_memory_inference import load_temporal_memory_model
+
+    strict_model, _ = load_temporal_memory_model(
+        checkpoint_path,
+        torch.device("cpu"),
+        context_bins=5,
+        width=16,
+        sequence_length=WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH,
+    )
+    if len(strict_model.state_dict()) != 89:
+        raise ValueError("Warm primary strict model schema is not the released 89-key form.")
+    del strict_model
+    if sha256_file(checkpoint_path) != checkpoint_sha256:
+        raise RuntimeError(
+            "Warm primary checkpoint changed during strict replay validation."
+        )
+    return {
+        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_sha256": checkpoint_sha256,
+        "parent_checkpoint_sha256": initialized_sha256,
+        "sequence_length": WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH,
+    }
+
+
+def _validate_released_m10_secondary_checkpoint(payload: Mapping) -> dict:
+    checkpoint, checkpoint_path, checkpoint_sha256 = _load_cache_checkpoint(
+        payload, "secondary cache"
+    )
+    if checkpoint_sha256 != RELEASED_M10_SHA256:
+        raise ValueError("Secondary cache checkpoint is not released M10.")
+    expected_memory = {
+        "temporal_bin_size": 50,
+        "context_bins": 5,
+        "width": 16,
+        "sequence_length": WARM_ROUTE_SECONDARY_SEQUENCE_LENGTH,
+        "log_count_clip": 4.0,
+        "density_calibration_enabled": True,
+        "trajectory_extrapolation_enabled": True,
+        "confidence_head_enabled": False,
+        "confidence_only_enabled": False,
+        "temporal_attention_enabled": False,
+    }
+    checkpoint_memory = checkpoint.get("temporal_memory")
+    _require_exact_mapping(
+        checkpoint_memory,
+        expected_memory,
+        "Released M10 temporal-memory metadata",
+    )
+    _validate_checkpoint_inference_settings(
+        checkpoint_memory,
+        payload["metadata"]["inference_settings"],
+        "secondary cache",
+    )
+    return {
+        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_sha256": checkpoint_sha256,
+        "sequence_length": WARM_ROUTE_SECONDARY_SEQUENCE_LENGTH,
+    }
+
+
+def _validate_warm_primary_m10_route(
+    primary_payload: Mapping,
+    secondary_payload: Mapping,
+    secondary_max_events: int,
+    runtime_inference_settings: Mapping,
+) -> dict:
+    if int(secondary_max_events) != WARM_ROUTE_SECONDARY_MAX_EVENTS:
+        raise ValueError(
+            "Warm T32/M10 replay requires secondary_max_events exactly {}."
+            .format(WARM_ROUTE_SECONDARY_MAX_EVENTS)
+        )
+    if not isinstance(runtime_inference_settings, Mapping):
+        raise ValueError(
+            "Warm T32/M10 replay requires complete runtime inference settings."
+        )
+    primary_settings = primary_payload["metadata"]["inference_settings"]
+    secondary_settings = secondary_payload["metadata"]["inference_settings"]
+    runtime_differences = _mapping_differences(
+        primary_settings, runtime_inference_settings
+    )
+    if runtime_differences:
+        raise ValueError(
+            "Warm primary cache inference settings differ from runtime: {}."
+            .format(", ".join(runtime_differences))
+        )
+    setting_differences = _mapping_differences(
+        primary_settings, secondary_settings
+    )
+    if setting_differences != ("temporal_memory_sequence_length",):
+        raise ValueError(
+            "Warm T32/M10 caches may differ only in temporal_memory_sequence_length; "
+            "changed: {}.".format(", ".join(setting_differences) or "none")
+        )
+    if (
+        primary_settings["temporal_memory_sequence_length"]
+        != WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH
+        or secondary_settings["temporal_memory_sequence_length"]
+        != WARM_ROUTE_SECONDARY_SEQUENCE_LENGTH
+    ):
+        raise ValueError(
+            "Warm route requires primary T32 and secondary M10 T16 settings."
+        )
+    primary_binding = _validate_warm_primary_checkpoint(primary_payload)
+    secondary_binding = _validate_released_m10_secondary_checkpoint(
+        secondary_payload
+    )
+    return {
+        "enabled": True,
+        "secondary_max_events": WARM_ROUTE_SECONDARY_MAX_EVENTS,
+        "metadata_difference_allowlist": [
+            "temporal_memory_sequence_length"
+        ],
+        "primary": primary_binding,
+        "secondary": secondary_binding,
+    }
+
+
 def _validate_cache_compatibility(
     primary_payload: Mapping,
     secondary_payload: Mapping,
-) -> None:
+    secondary_max_events: int = 0,
+    allow_warm_primary_t32_secondary_m10_t16: bool = False,
+    runtime_inference_settings: Optional[Mapping] = None,
+) -> Optional[dict]:
     primary_metadata = primary_payload["metadata"]
     secondary_metadata = secondary_payload["metadata"]
     if primary_metadata["dataset_signature"] != secondary_metadata["dataset_signature"]:
@@ -580,7 +1005,7 @@ def _validate_cache_compatibility(
     primary_settings = primary_metadata["inference_settings"]
     secondary_settings = secondary_metadata["inference_settings"]
     setting_differences = _mapping_differences(primary_settings, secondary_settings)
-    if setting_differences:
+    if setting_differences and not allow_warm_primary_t32_secondary_m10_t16:
         raise ValueError(
             "Primary and secondary cache inference settings differ: {}.".format(
                 ", ".join(setting_differences)
@@ -589,10 +1014,14 @@ def _validate_cache_compatibility(
 
     primary_code = primary_metadata["code_sha256"]
     secondary_code = secondary_metadata["code_sha256"]
-    code_differences = tuple(
-        path
-        for path in CACHE_CODE_PROVENANCE_PATHS
-        if primary_code.get(path) != secondary_code.get(path)
+    code_differences = (
+        _mapping_differences(primary_code, secondary_code)
+        if allow_warm_primary_t32_secondary_m10_t16
+        else tuple(
+            path
+            for path in CACHE_CODE_PROVENANCE_PATHS
+            if primary_code.get(path) != secondary_code.get(path)
+        )
     )
     if code_differences:
         raise ValueError(
@@ -600,23 +1029,45 @@ def _validate_cache_compatibility(
                 ", ".join(code_differences)
             )
         )
+    if allow_warm_primary_t32_secondary_m10_t16:
+        return _validate_warm_primary_m10_route(
+            primary_payload,
+            secondary_payload,
+            secondary_max_events,
+            runtime_inference_settings,
+        )
+    return None
 
 
 def route_cache_records(
     primary_payload: Mapping,
     secondary_payload: Optional[Mapping] = None,
     secondary_max_events: int = 0,
+    allow_warm_primary_t32_secondary_m10_t16: bool = False,
+    runtime_inference_settings: Optional[Mapping] = None,
 ) -> List[RoutedRecord]:
     """Route aligned raw scores using event count only (never file identity)."""
 
     validate_cache_payload(primary_payload, "primary cache")
     if int(secondary_max_events) < 0:
         raise ValueError("secondary_max_events must be non-negative.")
+    if allow_warm_primary_t32_secondary_m10_t16 and secondary_payload is None:
+        raise ValueError(
+            "Warm T32/M10 replay requires a secondary M10 cache."
+        )
     primary_records = primary_payload["records"]
     secondary_records = None
     if secondary_payload is not None:
         validate_cache_payload(secondary_payload, "secondary cache")
-        _validate_cache_compatibility(primary_payload, secondary_payload)
+        _validate_cache_compatibility(
+            primary_payload,
+            secondary_payload,
+            secondary_max_events=secondary_max_events,
+            allow_warm_primary_t32_secondary_m10_t16=(
+                allow_warm_primary_t32_secondary_m10_t16
+            ),
+            runtime_inference_settings=runtime_inference_settings,
+        )
         secondary_records = secondary_payload["records"]
         if len(primary_records) != len(secondary_records):
             raise ValueError("Primary and secondary cache video counts differ.")
@@ -641,6 +1092,16 @@ def route_cache_records(
             and int(secondary_max_events) > 0
             and int(primary["event_count"]) <= int(secondary_max_events)
         )
+        if allow_warm_primary_t32_secondary_m10_t16:
+            expected_secondary = (
+                int(primary["event_count"])
+                <= WARM_ROUTE_SECONDARY_MAX_EVENTS
+            )
+            if use_secondary != expected_secondary:
+                raise RuntimeError(
+                    "Warm replay routing violated the <=30000 M10 / >30000 T32 "
+                    "boundary for {}.".format(primary["file_name"])
+                )
         selected = secondary if use_secondary else primary
         routed.append(
             RoutedRecord(
@@ -1206,6 +1667,14 @@ def parse_args(argv: Optional[Sequence[str]] = None):
     replay_parser.add_argument("--primary-cache", type=Path, required=True)
     replay_parser.add_argument("--secondary-cache", type=Path)
     replay_parser.add_argument("--secondary-max-events", type=int, default=0)
+    replay_parser.add_argument(
+        "--allow-warm-primary-t32-secondary-m10-t16",
+        action="store_true",
+        help=(
+            "Explicitly allow only the audited warm-lineage T32 primary with "
+            "released M10 T16 at the fixed <=30000 route boundary."
+        ),
+    )
     replay_parser.add_argument("--density-cutoff", type=int, default=30000)
     replay_parser.add_argument("--low-min", default="0.710")
     replay_parser.add_argument("--low-max", default="0.730")
@@ -1309,7 +1778,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         secondary,
         args.secondary_max_events,
     )
-    records = route_cache_records(primary, secondary, args.secondary_max_events)
+    records = route_cache_records(
+        primary,
+        secondary,
+        args.secondary_max_events,
+        allow_warm_primary_t32_secondary_m10_t16=(
+            args.allow_warm_primary_t32_secondary_m10_t16
+        ),
+        runtime_inference_settings=_inference_settings(cfg),
+    )
     validate_component_reranker_dense_routes(cfg, records)
     low_thresholds = decimal_grid(args.low_min, args.low_max, args.threshold_step)
     high_thresholds = decimal_grid(args.high_min, args.high_max, args.threshold_step)
@@ -1374,6 +1851,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
         "results": results,
     }
+    if args.allow_warm_primary_t32_secondary_m10_t16:
+        output_payload["warm_primary_t32_secondary_m10_t16_route"] = {
+            "enabled": True,
+            "secondary_max_events": WARM_ROUTE_SECONDARY_MAX_EVENTS,
+            "metadata_difference_allowlist": [
+                "temporal_memory_sequence_length"
+            ],
+            "primary_sequence_length": WARM_ROUTE_PRIMARY_SEQUENCE_LENGTH,
+            "secondary_sequence_length": WARM_ROUTE_SECONDARY_SEQUENCE_LENGTH,
+            "released_m20_parent_sha256": RELEASED_M20_SHA256,
+            "released_m10_sha256": RELEASED_M10_SHA256,
+        }
     _write_json(args.output_json, output_payload)
     _write_csv(args.output_csv, results)
 

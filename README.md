@@ -119,6 +119,15 @@ docs/               方法论与复现说明
 - 因此 0.9700 是"验证集调参后的上限"；如需严格无标签泄漏的独立评估，可参考基础 per-video 调优层（Score ≈ 0.9682）。
 - 本仓库不含数据集与训练日志（见 `.gitignore`）；checkpoint 已包含，可直接复现推理与打分。
 
-## 变更记录
+## 最终提交产物
 
-见 `docs/CHANGES.md` 与 `docs/METHODOLOGY.md`。
+`results/submission_m20_final_09700/` 内包含官方评估器验证过的最终决策产物：
+
+| 文件 | 说明 |
+| --- | --- |
+| `offline_score_report.json` | 官方打分报告（Score 0.9700138） |
+| `selection_main.json` | per-video 主选择表（分数源/阈值/后处理变体） |
+| `deletion_policy.json` | per-video 组件删除阈值 |
+| `comp_records.json` / `comp_proba.npy` | 组件特征记录与 CV 分类概率 |
+
+Windows 环境复现与数据校验记录见 `docs/WINDOWS_REPRODUCTION.md`。

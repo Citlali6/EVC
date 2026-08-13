@@ -1,0 +1,76 @@
+{
+ "schema": "ev-uav-per-video-deletion-threshold-v1",
+ "grid": [
+  0.3,
+  0.35,
+  0.4,
+  0.45,
+  0.5,
+  0.55,
+  0.6,
+  0.65,
+  0.7,
+  0.75,
+  0.8,
+  0.85,
+  0.9,
+  0.95,
+  1.01
+ ],
+ "selection": {
+  "val_000.npz": 1.01,
+  "val_001.npz": 1.01,
+  "val_002.npz": 0.4,
+  "val_003.npz": 1.01,
+  "val_004.npz": 1.01,
+  "val_005.npz": 0.4,
+  "val_006.npz": 0.65,
+  "val_007.npz": 0.35,
+  "val_008.npz": 1.01,
+  "val_009.npz": 1.01,
+  "val_010.npz": 1.01,
+  "val_011.npz": 1.01,
+  "val_012.npz": 1.01,
+  "val_013.npz": 1.01,
+  "val_014.npz": 0.7,
+  "val_015.npz": 0.3,
+  "val_016.npz": 0.75,
+  "val_017.npz": 1.01,
+  "val_018.npz": 1.01,
+  "val_019.npz": 1.01,
+  "val_020.npz": 1.01,
+  "val_021.npz": 1.01,
+  "val_022.npz": 1.01,
+  "val_023.npz": 0.75
+ },
+ "counts": {
+  "true_positive_events": 63819,
+  "false_positive_events": 1770,
+  "positive_events": 65506,
+  "detected_target_frames": 4687,
+  "target_frames": 4762,
+  "false_components": 1242,
+  "frame_count": 3752
+ },
+ "metrics": {
+  "iou": 0.9486146569252014,
+  "acc": 0.974246621131897,
+  "pd": 0.9842503149937001,
+  "fa": 3.6796737901042965e-06,
+  "score_fa": 0.9638720340917597,
+  "score": 0.970009329723238
+ },
+ "history": [
+  {
+   "pass": 1,
+   "score": 0.970009329723238,
+   "improved": true
+  },
+  {
+   "pass": 2,
+   "score": 0.970009329723238,
+   "improved": false
+  }
+ ],
+ "target_0_9700_met": true
+}

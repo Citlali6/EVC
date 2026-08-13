@@ -1,0 +1,273 @@
+{
+  "counts": {
+    "evaluator_detected_objects": 4687,
+    "evaluator_false_components": 1242,
+    "evaluator_frames": 3752,
+    "evaluator_objects": 4762,
+    "event_false_negatives": 1686,
+    "event_false_positives": 1770,
+    "event_true_positives": 63820,
+    "events": 1424330,
+    "ground_truth_positive_events": 65506,
+    "predicted_positive_events": 65590,
+    "videos": 24
+  },
+  "dataset": {
+    "expected_sha256": "d780da17e69446b988b1b5fae7954855d5ce66a32aa7b9581eeb3e4a0563f83f",
+    "matches_official_sha256": true,
+    "official_sha256": "d780da17e69446b988b1b5fae7954855d5ce66a32aa7b9581eeb3e4a0563f83f",
+    "sha256": "d780da17e69446b988b1b5fae7954855d5ce66a32aa7b9581eeb3e4a0563f83f",
+    "sha256_scheme": "sha256(name_utf8 + NUL + member_sha256_bytes), canonical order",
+    "val_root": "F:\\小目标检测\\datasets\\EV-UAV-Challenge2\\val",
+    "verification_mode": "OFFICIAL-MANIFEST-LOCKED",
+    "warning": null
+  },
+  "evaluator": {
+    "class": "utils.eval.evalute",
+    "class_source": "F:\\小目标检测\\EVC-work\\utils\\eval.py",
+    "class_source_sha256": "cb9de56b54a7153d80a2fd32432188665e830e0a9b945965f2cbd6765bb354e5",
+    "correct_threshold": 0.0001,
+    "ground_truth_label_source": "NPZ ev['label']",
+    "metrics_helper": "utils.challenge_eval.evaluate_challenge_metrics",
+    "metrics_helper_source": "F:\\小目标检测\\EVC-work\\utils\\challenge_eval.py",
+    "metrics_helper_source_sha256": "a09e9a4b74abb06864e4551778addd624e53654041c98a41dbe61a1f67fbc952",
+    "pd_detection_interval": 50,
+    "prediction_source": "TXT column 5",
+    "prediction_threshold": 0.9,
+    "resolution": {
+      "height": 260,
+      "width": 346
+    },
+    "roc_timestamp_source": "NPZ ev_loc[:, 2] (not TXT column 3)",
+    "score_fa_scale": 10000.0,
+    "score_weights": {
+      "acc": 0.1,
+      "iou": 0.2,
+      "pd": 0.4,
+      "score_fa": 0.3
+    },
+    "target_id_source": "NPZ ev['name']"
+  },
+  "files": [
+    {
+      "events": 45361,
+      "ground_truth_positive_events": 2778,
+      "npz_sha256": "a1e4ba6356e2fd792b639afbb86f2d3689bc31ff7442c7588c84b6c63afa606a",
+      "predicted_positive_events": 2763,
+      "stem": "val_000",
+      "txt_sha256": "f725c42f7628f66215a9eafcf885e41aeec3c110e18ff376465ee0f577ddb43c"
+    },
+    {
+      "events": 54625,
+      "ground_truth_positive_events": 1234,
+      "npz_sha256": "d96a9e72d28b7c345cc8dd8e60f5736cbba71d8801d363f1b8d466cc89dfdd94",
+      "predicted_positive_events": 1376,
+      "stem": "val_001",
+      "txt_sha256": "c20ba582ac34a2d849eb2acdc705279cad1def07b58d2755d3fffa7aef0ec21b"
+    },
+    {
+      "events": 55695,
+      "ground_truth_positive_events": 1929,
+      "npz_sha256": "6b5a19c42a36d845433362d4dbb15c4f4b5be7e2f28689497d488d2e227bdeda",
+      "predicted_positive_events": 1942,
+      "stem": "val_002",
+      "txt_sha256": "d20d2ba41e4f8dcee38b0aa418dc07b2b0a34f060b4ab8777fbf9ead1dad5ff4"
+    },
+    {
+      "events": 56519,
+      "ground_truth_positive_events": 1273,
+      "npz_sha256": "c46c422ebd1dae3ff9ab3ea033693a75685c7f75c04081484ca88bf0d9c5b1bc",
+      "predicted_positive_events": 1352,
+      "stem": "val_003",
+      "txt_sha256": "8bcd56057ed46f9513cc708e4fd6aaec6dbc9aa52218e28111a9f54519c9cae4"
+    },
+    {
+      "events": 24933,
+      "ground_truth_positive_events": 2324,
+      "npz_sha256": "0d5c8422db2446f9cd277189e668c316d63e8d7460deb465a032781f5e5ee8b8",
+      "predicted_positive_events": 2346,
+      "stem": "val_004",
+      "txt_sha256": "6aef889688744d4e8a4a441fd773cd730b0b9203cfad890b04fb7b21a4584f53"
+    },
+    {
+      "events": 23566,
+      "ground_truth_positive_events": 1283,
+      "npz_sha256": "8780f151e6c19384298215d6fff0ab4669543684694f9fa2bc8a0dd886544e3c",
+      "predicted_positive_events": 1296,
+      "stem": "val_005",
+      "txt_sha256": "a67c6f9b3ef30caf6ce44f2a87c6d41c586524b3dc39219bee5ebe7b7ff706da"
+    },
+    {
+      "events": 21773,
+      "ground_truth_positive_events": 703,
+      "npz_sha256": "24eaf86210425fbe975636c7ae76dbf089f6b380d33feb8d64c312bdd675ae4d",
+      "predicted_positive_events": 734,
+      "stem": "val_006",
+      "txt_sha256": "f7e30829a04c3ca785fc46c1959fce4cbcbd59fa6ee2036d43fd3a403d274260"
+    },
+    {
+      "events": 22194,
+      "ground_truth_positive_events": 2016,
+      "npz_sha256": "a9a47e4c3add40594624a7eccb2961d9f0800fa28fad5613abfff2ab3b764288",
+      "predicted_positive_events": 2029,
+      "stem": "val_007",
+      "txt_sha256": "7616bc77b6fdf79ca76b0c5c8f6ddfa7cfc2068ff13f9c77b53fc777544d8588"
+    },
+    {
+      "events": 70943,
+      "ground_truth_positive_events": 3591,
+      "npz_sha256": "d867fbf15ffbec65c8d956d12a8c94ae04a058f9d43a95a57bda0d0ff5b3c340",
+      "predicted_positive_events": 3594,
+      "stem": "val_008",
+      "txt_sha256": "35c7ca41576bc84a0b3c8d2b96abee58d1de26ee744c87d860cd1a2357bd8d3f"
+    },
+    {
+      "events": 57607,
+      "ground_truth_positive_events": 2821,
+      "npz_sha256": "c45f34bd163753a2b33a66b888c333992acfc02e479e970b82b05da949ac9644",
+      "predicted_positive_events": 2844,
+      "stem": "val_009",
+      "txt_sha256": "b7fa79bc2ec98a870223facfdd747402410eb810de50366233f9b240eeafbfc5"
+    },
+    {
+      "events": 43897,
+      "ground_truth_positive_events": 1794,
+      "npz_sha256": "68fe4b367bd726cf13d565efce71626d16c82a1d5e23a04b2a7e15ec53747136",
+      "predicted_positive_events": 1816,
+      "stem": "val_010",
+      "txt_sha256": "be9b84b2ee87543279275c8bd4c41eed5a708583ff5904dba57e0d0d4e1a8fec"
+    },
+    {
+      "events": 43971,
+      "ground_truth_positive_events": 4393,
+      "npz_sha256": "00a64898fff553eb7fae2da5a5348d0ce092106e6b7ab9ef0c15df04efa79138",
+      "predicted_positive_events": 4367,
+      "stem": "val_011",
+      "txt_sha256": "6aa7c5dd6dd7faf71c1affef40c09a20ea8d52445e57c6ff4fa65784053e2cbc"
+    },
+    {
+      "events": 39595,
+      "ground_truth_positive_events": 5837,
+      "npz_sha256": "783d1a9e7cec10ae7824ced690a48c7e6d610831b76e16de0bde5be36140911e",
+      "predicted_positive_events": 5841,
+      "stem": "val_012",
+      "txt_sha256": "96b024500cfd79061a29750cc222eb3ebd1614b1be8d0e77b78547b36084f47a"
+    },
+    {
+      "events": 22034,
+      "ground_truth_positive_events": 4518,
+      "npz_sha256": "7dc85445cb3556514c5173a5e44fad2db294f7b2a27700d71ae82b9b614aecb6",
+      "predicted_positive_events": 4592,
+      "stem": "val_013",
+      "txt_sha256": "e684338833ab82c07fc4d39d6d728a84cb858f6acdb237cad4f569007d197d68"
+    },
+    {
+      "events": 44399,
+      "ground_truth_positive_events": 1268,
+      "npz_sha256": "56ce726ef985c529196d8de56abe3c4e8c856c0fa32233e1a233a74e1e8a730b",
+      "predicted_positive_events": 1220,
+      "stem": "val_014",
+      "txt_sha256": "473506f77ec1957dff41ed01b8a6d53658d1180ead082b530349df41264e3638"
+    },
+    {
+      "events": 253955,
+      "ground_truth_positive_events": 2139,
+      "npz_sha256": "613d14b34aa6daca847be7a5abec2839f38c3ca15493dd4b82de57aae12f6179",
+      "predicted_positive_events": 2236,
+      "stem": "val_015",
+      "txt_sha256": "7b15434c2327a0ab0d9b23257c0c52c4ff5acf681e99eba691140395b5214f8d"
+    },
+    {
+      "events": 20608,
+      "ground_truth_positive_events": 3619,
+      "npz_sha256": "e1bde9a0a9a646650e396f7d370fd63b6e50645d20a50f37b5134bf5a0f3670e",
+      "predicted_positive_events": 3617,
+      "stem": "val_016",
+      "txt_sha256": "049dafff1a8d487b08749f04a71472838b689dfb17820f5ffde1beaa0475e1ed"
+    },
+    {
+      "events": 20064,
+      "ground_truth_positive_events": 2972,
+      "npz_sha256": "ea2931dfd62ed4d7f08147cb4e85cca806f55043fd060ea320a2508be6e6c7b6",
+      "predicted_positive_events": 2914,
+      "stem": "val_017",
+      "txt_sha256": "8bcc81f61be091767093029fe797a7e726f74d01f6653e77a6fe5559dd29217b"
+    },
+    {
+      "events": 19594,
+      "ground_truth_positive_events": 3294,
+      "npz_sha256": "093486f51d7bd8792ed0bd4ff8da1897e2f17e318bc4aa82d09a87e703e6dba7",
+      "predicted_positive_events": 3337,
+      "stem": "val_018",
+      "txt_sha256": "58a97a55178822f9943f65a8174705f0e61b88d1b910ff32d3d19f80910e1793"
+    },
+    {
+      "events": 31971,
+      "ground_truth_positive_events": 2854,
+      "npz_sha256": "0b74daccc45e61ce0f3245f5431d09255e17e6871336249097e9b5639949fb9d",
+      "predicted_positive_events": 2846,
+      "stem": "val_019",
+      "txt_sha256": "5eb82035cbea7238d24f519d724ba8958b01f5c376cb6203b53e28739a09afef"
+    },
+    {
+      "events": 33159,
+      "ground_truth_positive_events": 3531,
+      "npz_sha256": "104cbc0e58c4f138e4a5dbadb531d34f48cd7f30ddbd4075e20697f6666d6b06",
+      "predicted_positive_events": 3495,
+      "stem": "val_020",
+      "txt_sha256": "c8a5e593c79329d3b8b2b82f2380f2c249489dfb4f92c78a360a9996b7189587"
+    },
+    {
+      "events": 18358,
+      "ground_truth_positive_events": 1158,
+      "npz_sha256": "72bcea68de3a6a5af5017d7953084463028cf64c448145f5522eac61c05bfac5",
+      "predicted_positive_events": 1258,
+      "stem": "val_021",
+      "txt_sha256": "119977e2abe85db5f2aaa3e7a3715f5b5de557fa8cc7f82578fd80dc1a0886fe"
+    },
+    {
+      "events": 8165,
+      "ground_truth_positive_events": 2187,
+      "npz_sha256": "5009601522900135b4fd228cc82850e2831d3150348297803d3e407bccddea5d",
+      "predicted_positive_events": 2176,
+      "stem": "val_022",
+      "txt_sha256": "096fe7a164aebcba643b3d6ac3d33363dafedca4bf2f1f74c3d5542cc9b80d97"
+    },
+    {
+      "events": 391344,
+      "ground_truth_positive_events": 5990,
+      "npz_sha256": "7fb44d523bb3b5df67a5356ee0314458b1d2a34a1221d631c4783c5e25097dbd",
+      "predicted_positive_events": 5599,
+      "stem": "val_023",
+      "txt_sha256": "f337bb4e260fc69dc0dea25fdd6a933581d487117ed1f9bc7e47e34e37749787"
+    }
+  ],
+  "metrics": {
+    "acc": 0.9742618799209595,
+    "fa": 3.6796737901042965e-06,
+    "iou": 0.9486294984817505,
+    "pd": 0.9842503149937001,
+    "score": 0.9700138239134541,
+    "score_fa": 0.9638720340917597
+  },
+  "provenance": {
+    "created_at_utc": "2026-08-12T22:50:54.569741+00:00",
+    "numpy": "1.26.4",
+    "opencv": "4.8.1",
+    "pandas": "2.3.3",
+    "platform": "Windows-10-10.0.26100-SP0",
+    "python": "3.9.25 (main, Nov  3 2025, 22:44:01) [MSC v.1929 64 bit (AMD64)]",
+    "script": "F:\\小目标检测\\EVC-work\\score_challenge2_submission.py",
+    "script_sha256": "e8be285e82d6c997a289272d4bc9598bb0d59f521be6b20c739f97c09714f654",
+    "torch": "2.5.1+cu121"
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "submission": {
+    "kind": "directory",
+    "path": "F:\\小目标检测\\results\\submission_m20_final_09700",
+    "sha256": "9254059ac12ed6e3b8f4f2b15328acf4fc36b46fb3fa5b9e51862a4a616d6316",
+    "sha256_scheme": "sha256(name_utf8 + NUL + member_sha256_bytes), canonical order"
+  },
+  "task": "EV-UAV Challenge 2 validation"
+}

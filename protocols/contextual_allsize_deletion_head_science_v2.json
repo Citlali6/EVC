@@ -1,0 +1,80 @@
+{
+  "schema": "ev-uav-contextual-allsize-deletion-head-science-v2",
+  "status": "frozen_before_contextual_h2_smoke",
+  "scope": {
+    "dataset_split": "train",
+    "cache_manifest_sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+    "selected_source_count": 54,
+    "selected_event_count": 8555762,
+    "validation_allowed": false,
+    "test_allowed": false,
+    "gpu_allowed": false
+  },
+  "component_definition": {
+    "input": "frozen full C00 scores at effective float32 threshold 0.719",
+    "spatial_radius": 1,
+    "temporal_bin_size": 50,
+    "max_link_distance": 6.0,
+    "max_gap_bins": 1,
+    "max_component_events": "unbounded",
+    "operation": "whole-component deletion only"
+  },
+  "feature_contract": {
+    "module": "utils/contextual_deletion_head.py",
+    "module_sha256": "60395f627256d58c87b9b07c2771ee638631558c2f278820769d770a25e95c3d",
+    "feature_count": 92,
+    "feature_names_canonical_sha256": "4c8da3faa3269edba020e4abc08e9cfb1f6b1c344baae808398c4283cb5ec90d",
+    "families": [
+      "base_component_and_track",
+      "component_score_quantiles",
+      "shape_compactness_density_border",
+      "per_video_relative_z",
+      "same_cell_active_bin_counts",
+      "gap1_gap2_neighbor_context",
+      "cross_bin_graph_context",
+      "3x3_5x5_raw_score_context_at_offsets_minus2_to_plus2"
+    ],
+    "forbidden_features": [
+      "source_name",
+      "source_index",
+      "source_family",
+      "absolute_time_bin",
+      "event_label",
+      "target_id"
+    ]
+  },
+  "source_groups": {
+    "F1": "train_000..014",
+    "F2": "train_028..032",
+    "F3": "train_040..047",
+    "F4": "train_059..065 plus train_067..074",
+    "F5": "train_088..098"
+  },
+  "models": {
+    "families": [
+      "l2_regularized_logistic",
+      "shallow_hist_gradient_boosting",
+      "shallow_extra_trees"
+    ],
+    "model_structure_constants_are_algorithm_definition": true,
+    "source_weighting": "equal total component mass per fit source",
+    "class_weighting": "derived from effective positive and negative mass in fit sources",
+    "numeric_keep_thresholds": "identity and minimum fit-positive keep probability only"
+  },
+  "evaluation": {
+    "first_smoke": "hold F5 train_088..098; fit F1..F4 only",
+    "full_followup_if_smoke_has_signal": "five-family outer leave-one-family-out with inner leave-one-fit-family-out model selection",
+    "official_metrics_required": [
+      "Score",
+      "IoU",
+      "Pd",
+      "Fa",
+      "true_positive_events",
+      "false_positive_events",
+      "false_components",
+      "correct_objects"
+    ],
+    "safety": "Score/IoU/Pd/correct_objects/TP not lower and Fa not higher on every held family",
+    "model_selection_access": "fit-side grouped evidence only"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "schema": "ev-uav-contextual-track-recovery-f5-smoke-protocol-v2",
+  "scope": "train-only F5 held-family smoke; no validation or test access; CPU only; no runtime/default/submission mutation",
+  "immutable_population": {
+    "cache_split": "official train",
+    "cache_filter": "complete-video event_count > 30000",
+    "source_count": 54,
+    "event_count": 8555762,
+    "outer_fit_families": [
+      "block_000_014",
+      "block_028_032",
+      "block_040_047",
+      "block_059_074"
+    ],
+    "outer_held_family": "block_088_098"
+  },
+  "proposal": {
+    "source": "frozen P18 seed-track endpoint proposal geometry",
+    "raw_score_interval": "[0.53, 0.719)",
+    "spatial_radius": 5,
+    "temporal_bin_size": 50,
+    "max_link_distance": 8.0,
+    "minimum_seed_track_bins": 4,
+    "maximum_actions_per_endpoint": 1,
+    "deployment_event_count_cap": null,
+    "labels_or_target_ids_accepted_by_extractor": false,
+    "source_name_path_hash_index_or_fold_is_feature": false,
+    "absolute_coordinate_or_timestamp_is_feature": false
+  },
+  "features": {
+    "semantics": "p18-track-edge-contextual-score-shape-v2",
+    "inputs": "raw M20 scores, frozen C00 scores, relative x/y/t neighborhoods, complete-video event count",
+    "context_offsets": [-3, -2, -1, 0, 1, 2, 3],
+    "context_radii": [3, 8]
+  },
+  "nested_selection": {
+    "inner_scheme": "F1-F4 leave-one-family-out predictions from models trained on two of the other three families",
+    "outer_prediction": "ensemble of all six F1-F4 pair-fit models; every member is unseen on F5",
+    "model_families": [
+      "logistic_l2",
+      "histgb_shallow",
+      "extratrees_shallow"
+    ],
+    "targets": [
+      "event_positive",
+      "pd_group_recovery"
+    ],
+    "ensemble_aggregations": [
+      "mean",
+      "median",
+      "minimum"
+    ],
+    "score_representations": [
+      "raw_probability",
+      "within_video_percentile"
+    ],
+    "threshold": "selected only from inner held-family OOF scores; no numeric action threshold is frozen",
+    "winner": "highest conservative pooled inner OOF Challenge score among candidates passing every-fold gates; deterministic tie breaks"
+  },
+  "inner_gates": {
+    "each_fold_score_delta_minimum": 0.0,
+    "each_fold_iou_delta_minimum": 0.0,
+    "each_fold_pd_delta_minimum": 0.0,
+    "each_fold_correct_objects_delta_minimum": 0,
+    "pooled_score_delta_strictly_positive": true,
+    "pooled_pd_delta_strictly_positive": true,
+    "pooled_correct_objects_delta_minimum": 1,
+    "false_component_accounting_during_selection": "sum of nonnegative exact one-action deltas (conservative upper bound)"
+  },
+  "outer_success_gate": {
+    "score_delta_strictly_positive": true,
+    "iou_delta_minimum": 0.0,
+    "pd_delta_strictly_positive": true,
+    "correct_objects_delta_minimum": 1,
+    "false_components_per_new_correct_object_maximum": "inner-OOF winner tradeoff; no F5-derived cutoff",
+    "if_failed": "stop and do not expand to all five outer folds"
+  },
+  "held_label_firewall": {
+    "observable F5 proposals and features may be computed before selection": true,
+    "F5 labels and target_ids may be opened before winner freeze": false,
+    "winner_freeze_receipt_required_before_F5_labels": true
+  }
+}

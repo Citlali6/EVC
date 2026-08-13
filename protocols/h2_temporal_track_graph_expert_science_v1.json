@@ -1,0 +1,140 @@
+{
+  "schema": "ev-uav-frozen-m20-h2-temporal-track-graph-expert-science-v1",
+  "created_local": "2026-08-11T13:18:00+08:00",
+  "status": "stopped_before_gpu_by_preregistered_cpu_separability_gate",
+  "experiment_id": "h2_temporal_track_graph_expert_v1",
+  "objective": "Use complete-video motion context to classify whole post-C00 tracks/components as pure false positive while preserving retained event scores bitwise.",
+  "science_scope": {
+    "dataset": "train_088_to_098_only",
+    "validation_read_allowed": false,
+    "test_read_allowed": false,
+    "platform_submission_allowed": false,
+    "source_name_path_hash_fold_sample_index_label_or_target_id_inference_feature_allowed": false,
+    "labels_use": "training_targets_and_final_held_metrics_only",
+    "released_M20_pretraining_exposure_disclosure": "Grouped OOF evaluates only the new graph expert because released M20 previously saw all train sources."
+  },
+  "released_baseline": {
+    "checkpoint": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+    "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "complete_stream": "T160",
+    "prediction_threshold": 0.719,
+    "postprocess": "released_effective_C00",
+    "train_cache_manifest": "experiments/20260810_component_reranker_crosssource_v1/train_cache_gt30000/manifest.json",
+    "train_cache_manifest_sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82"
+  },
+  "source_groups": {
+    "g1_088_091": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz"],
+    "g2_092_094": ["train_092.npz", "train_093.npz", "train_094.npz"],
+    "g3_095_098": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+  },
+  "outer_folds": [
+    {
+      "fold_id": "hold_g1",
+      "fit_groups": ["g2_092_094", "g3_095_098"],
+      "held_group": "g1_088_091"
+    },
+    {
+      "fold_id": "hold_g2",
+      "fit_groups": ["g1_088_091", "g3_095_098"],
+      "held_group": "g2_092_094"
+    },
+    {
+      "fold_id": "hold_g3",
+      "fit_groups": ["g1_088_091", "g2_092_094"],
+      "held_group": "g3_095_098"
+    }
+  ],
+  "graph": {
+    "node_unit": "complete_post_C00_8_connected_component_inside_one_official_50_time_bin",
+    "candidate_edges": "directed_three_nearest_components_for_each_gap_one_or_two_bins_with_motion_geometry_and_input_context",
+    "deterministic_track": "union_of_adjacent_bin_mutual_nearest_component_links_without_a_fitted_distance_threshold",
+    "node_feature_count": 64,
+    "edge_feature_count": 16,
+    "track_feature_count": 12,
+    "inputs": [
+      "complete_input_event_count",
+      "input_event_locations_and_relative_time",
+      "input_event_polarity_and_activity",
+      "released_M20_dense_scores",
+      "released_M20_decoder0_mean_and_std_per_component"
+    ],
+    "truth_bearing_inference_features": [],
+    "architecture_constants_are_not_source_specific": true,
+    "architecture_or_topology_grid_allowed": false
+  },
+  "expert": {
+    "module": "model/h2_temporal_track_graph_expert.py",
+    "module_sha256": "c72a83fbb9f6966e7b3704f51ed1a384225efd2629c4e479734f26154283e30e",
+    "hidden_width": 48,
+    "edge_conditioned_message_layers": 3,
+    "trainable_parameter_count": 108141,
+    "heads": ["whole_component_pure_FP", "whole_track_pure_FP"],
+    "candidate_count": 1,
+    "model_grid_allowed": false
+  },
+  "atomic_edit_contract": {
+    "allowed": ["zero_all_events_in_a_complete_component", "zero_all_events_in_a_complete_track"],
+    "retained_event_scores": "bitwise_released_M20_post_C00",
+    "local_attenuation_allowed": false,
+    "partial_component_edit_allowed": false,
+    "partial_track_edit_allowed_in_track_mode": false
+  },
+  "nested_risk_control": {
+    "inner_OOF": "For each outer fold, train on one fit group and predict the other in both directions.",
+    "cutoff": "nextafter(max_inner_OOF_probability_among_target_bearing_tracks,+infinity)",
+    "cutoff_grid_allowed": false,
+    "identity_rule": "Disable deletion when the analytic cutoff deletes no inner-OOF pure-FP track.",
+    "held_labels_used_for_cutoff": false
+  },
+  "promotion_gates": {
+    "each_fold_and_pooled": {
+      "score_not_lower": true,
+      "iou_not_lower": true,
+      "pd_not_lower": true,
+      "true_positive_events_not_lower": true,
+      "correct_objects_not_lower": true,
+      "fa_not_higher": true,
+      "false_positive_events_not_higher": true,
+      "false_components_not_higher": true
+    },
+    "pooled_H2_score_gain_minimum": 0.02,
+    "non_identity_each_fold": true
+  },
+  "cpu_gate": {
+    "runner": "EVC-work/run_h2_temporal_track_graph_cpu_gate.py",
+    "runner_sha256": "10982dc50c958183765577ab92f5ff36dcfafcd791d11d748f7af592d9b24cb6",
+    "utility": "EVC-work/utils/h2_temporal_track_graph.py",
+    "utility_sha256": "56f11d687fdc74d49179891fb67fc31cc9a626c3b6e87baec66f4b0e9e32a193",
+    "tests": "EVC-work/tests/test_h2_temporal_track_graph_expert.py",
+    "tests_sha256": "c8d38e519b8a4c6366f3d030fa3f8dbc7c45453fdca3b82a16a4c2dbaf276db4",
+    "test_result": "6_of_6_passed_CPU",
+    "report": "experiments/20260811_h2_temporal_track_graph_expert_v1/cpu_oracle_separability/report.json",
+    "report_sha256": "a740aa1e4458907bd4614ad1524fd6440bab5680854e494417c3a2f447463e6b",
+    "whole_component_oracle_score_delta": 0.1704371854822596,
+    "whole_track_oracle_score_delta": 0.11401528845053865,
+    "fixed_linear_nested_OOF_roc_auc": 0.8070197517911881,
+    "fixed_linear_nested_OOF_score_delta": 0.00015164844408366296,
+    "fixed_linear_nested_OOF_true_positive_event_delta": -2,
+    "safe_nonidentity_folds": 0,
+    "identity_folds": 2,
+    "unsafe_nonidentity_folds": 1,
+    "decision": "stop_before_gpu_insufficient_or_unsafe_basic_separability"
+  },
+  "gpu_budget_if_reopened_by_new_evidence": {
+    "gpu_authorized": false,
+    "expert_parameter_storage_fp32_MiB": 0.413,
+    "expert_training_weights_gradients_and_Adam_states_estimate_MiB": 1.7,
+    "full_graph_edge_upper_order": "approximately_12_directed_edges_per_node",
+    "graph_expert_activation_estimate_MiB": 64,
+    "released_M20_streaming_decoder_is_dominant": true,
+    "conservative_total_peak_budget_GiB": 3.25,
+    "basis": "analytic_graph_bound_plus_existing_released_M20_probe_receipts_not_a_new_GPU_measurement",
+    "probe_before_formal_required": true
+  },
+  "output_contract": {
+    "default_core_or_submission_change_allowed": false,
+    "no_clobber": true,
+    "validation_or_test_read": false,
+    "formal_GPU_OOF_allowed_after_cpu_gate": false
+  }
+}

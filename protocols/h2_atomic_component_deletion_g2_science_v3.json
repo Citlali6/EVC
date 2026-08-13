@@ -1,0 +1,296 @@
+{
+  "schema": "ev-uav-frozen-m20-h2-atomic-component-deletion-g2-v3",
+  "created_local": "2026-08-11T13:10:00+08:00",
+  "status": "frozen_before_any_v3_gpu_probe_or_g2_prediction",
+  "experiment_id": "h2_atomic_component_deletion_g2_v3",
+  "objective": "rank pure-false-positive post-C00 components with an activity-first network and delete only complete components while every retained M20+C00 float32 score remains bitwise identical",
+  "scientific_scope": {
+    "dataset_split": "train_only_H2_088_to_098",
+    "validation_read_allowed": false,
+    "test_read_allowed": false,
+    "platform_submission_allowed": false,
+    "default_core_or_submission_change_allowed": false,
+    "source_name_path_hash_fold_id_absolute_time_label_or_target_id_inference_feature_allowed": false,
+    "labels": "define fit-only pure-FP component classes, inner-OOF calibration safety, and paired metrics only",
+    "released_m20_pretraining_exposure_disclosure": "released M20 previously saw all train sources; fresh G2 tests only transfer of the new component scorer",
+    "candidate_count": 1,
+    "architecture_loss_threshold_or_cutoff_grid_allowed": false
+  },
+  "development_evidence": {
+    "use": "mechanism_and_activity-adapter_architecture_choice_only; never a V3 metric, cutoff, checkpoint, or G1 retest",
+    "g1_sources": [
+      "train_088.npz",
+      "train_089.npz",
+      "train_090.npz",
+      "train_091.npz"
+    ],
+    "released_m20_c00": {
+      "score": 0.766362620,
+      "true_positive_events": 10853,
+      "false_positive_events": 4127,
+      "correct_objects": 1092,
+      "false_components": 1523
+    },
+    "activity_only_control": {
+      "score": 0.786697089618198,
+      "true_positive_events": 10781,
+      "false_positive_events": 3025,
+      "correct_objects": 1088,
+      "false_components": 1155
+    },
+    "delta": {
+      "score": 0.020334469618198,
+      "true_positive_events": -72,
+      "false_positive_events": -1102,
+      "correct_objects": -4,
+      "false_components": -368
+    },
+    "source_level_target_support_delta_088_to_091": {
+      "true_positive_events": [-23, -31, -8, -10],
+      "correct_objects": [0, -5, 0, 1]
+    },
+    "old_activity_artifact_limitation": "only source-level counts and score hashes were persisted; no old activity event scores or embeddings exist and G1 will not be rerun",
+    "mechanism_conclusion": "activity carries useful H2 noise ranking but pixelwise replacement loses target support; V3 therefore uses activity only as a component embedding and makes a conservative atomic keep/delete action on released-M20+C00 components",
+    "artifacts": [
+      {
+        "workspace_relative_path": "experiments/20260811_h2_spatiotemporal_residual_refiner_oof_v1/held_train_evaluation/hold_g1/paired_evaluation.json",
+        "sha256": "8f6395f1b7d1b5a64a1639b92d5aba3bdc06e45dbd992001633e4ce25c3f72c5"
+      },
+      {
+        "workspace_relative_path": "experiments/20260811_high_density_dual_expert_grouped_oof_v1/held_train_evaluation/h2_hold_088_091__baseline/evaluation.json",
+        "sha256": "9417cc2569fa96e6a0a9dc4989fcb9e85225154b71516dccebe513f9c3b650fa"
+      }
+    ]
+  },
+  "released_m20": {
+    "workspace_relative_path": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+    "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "state_tensor_count": 89,
+    "parameter_count": 1924716,
+    "all_parameters_frozen": true,
+    "forced_eval_mode": true,
+    "full_stream_bins": 160,
+    "dense_feature": "decoder0_16_channels_and_base_logit"
+  },
+  "rich_m20_cache": {
+    "manifest_workspace_relative_path": "experiments/20260810_component_reranker_crosssource_v1/train_cache_gt30000/manifest.json",
+    "manifest_sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+    "schema": "ev-uav-component-reranker-train-cache-v1",
+    "record_indices_for_H2_088_to_098": [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53],
+    "arrays": ["scores_float32", "locs_int16_Nx3", "labels_uint8_fit_or_metrics_only", "target_ids_int16_fit_or_metrics_only"],
+    "reference_inference_batch_size": 8,
+    "v3_inference_batch_size": 16,
+    "use": "immutable source/location/baseline numerical reference only; never a component-network feature or cutoff input",
+    "numerical_policy": "persist both cache and V3 score hashes plus absolute-difference and threshold-disagreement diagnostics; do not select or modify V3 from the difference"
+  },
+  "input_only_route": {
+    "domain": "event_count > 200000 AND complete-input polarity minority fraction >= 0.20",
+    "event_count_cutoff_exclusive": 200000,
+    "polarity_minority_cutoff": 0.20,
+    "cutoff_provenance": "pre-existing train-only H1/H2 wide-gap route, not chosen from G1/G2/validation/test metrics",
+    "route_evidence_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/high_density_dual_expert_grouped_oof_science_v1.json",
+      "sha256": "a4f3ffaaf5a887fade2f47e08d32d5a716b31d2251bdbb0abcba9ae9b4d47d42",
+      "H1_train_range": [0.011984213619951297, 0.10165402429056912],
+      "H2_train_range": [0.46160600375234523, 0.4661295986649011]
+    },
+    "non_H2": "released M20+C00 bitwise identity",
+    "source_name_path_hash_or_fold_routing": false
+  },
+  "source_groups": {
+    "g1_088_091": {
+      "role_in_fresh_g2": "fit_group_and_inner_held_against_g3",
+      "sources": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz"]
+    },
+    "g2_092_094": {
+      "role_in_fresh_g2": "single_outer_held_group_opened_only_after_checkpoint_and_cutoff_receipt",
+      "sources": ["train_092.npz", "train_093.npz", "train_094.npz"]
+    },
+    "g3_095_098": {
+      "role_in_fresh_g2": "fit_group_and_inner_held_against_g1",
+      "sources": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+    }
+  },
+  "sources": {
+    "train_088.npz": {"event_count": 399750, "polarity_minority_fraction": 0.46160600375234523, "sha256": "29d5bbc31d23b38a91d349896a530b2d416224db4b464b1ae45c355b94b1ec10"},
+    "train_089.npz": {"event_count": 405722, "polarity_minority_fraction": 0.4621662123325824, "sha256": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb"},
+    "train_090.npz": {"event_count": 422448, "polarity_minority_fraction": 0.4629185130477597, "sha256": "5de16df85ee466b7ee1d8ecbf465a8cbfe64d2029b7b7a895cc181ca75559102"},
+    "train_091.npz": {"event_count": 423790, "polarity_minority_fraction": 0.4625899620094858, "sha256": "7314cdd6627d9bf538656abc7e098b8fd21e79038591e5a941187844eb7aed7e"},
+    "train_092.npz": {"event_count": 595519, "polarity_minority_fraction": 0.4637820119929003, "sha256": "9b8707627ac1bbcd471bbff7fc9b02fafbe5c6dd0f54857dbb158fb8916eeca6"},
+    "train_093.npz": {"event_count": 620778, "polarity_minority_fraction": 0.4661295986649011, "sha256": "460e45e7bc5d3df8a1a1dbd8a19427c95d130937ec3e4912c2dda3f693456338"},
+    "train_094.npz": {"event_count": 614725, "polarity_minority_fraction": 0.4645068933262841, "sha256": "8c5f985c75abeac73cc87e3419deb461ba508fc16fe1411b98b4f70f15458eec"},
+    "train_095.npz": {"event_count": 365730, "polarity_minority_fraction": 0.46401170262215297, "sha256": "b86e9b764b3bd9e151d9657a4a0b5c3255e0296882c3b367131f31443bf2eeb3"},
+    "train_096.npz": {"event_count": 625178, "polarity_minority_fraction": 0.46380550819126715, "sha256": "7c136b7dbb8ad85ddc43c50ef2886c062ac9ab7e9927951ecc6c67e7ea397a7c"},
+    "train_097.npz": {"event_count": 619767, "polarity_minority_fraction": 0.4654604068948492, "sha256": "3583cd09272702cf1da8caf76f7b802856c41394555b0c990124c08515d16ac5"},
+    "train_098.npz": {"event_count": 624246, "polarity_minority_fraction": 0.4650842776725842, "sha256": "0a60a0dc6f80258ec428f97b30e2be683fd2d35391b0a76801ca4c8a3585ee13"}
+  },
+  "formal_g2": {
+    "fold_id": "hold_g2",
+    "fit_groups": ["g1_088_091", "g3_095_098"],
+    "held_group": "g2_092_094",
+    "nested_grouped_oof": "model_G1 scores only G3 and model_G3 scores only G1 for cutoff and fit-only safety; held G2 score is min(model_G1,model_G3)",
+    "fresh_initialization": true,
+    "g2_excluded_from_fit_calibration_checkpoint_and_all_model_selection": true,
+    "checkpoint_and_cutoff_hashed_before_first_g2_open": true,
+    "g1_v3_retest_allowed": false,
+    "g3_v3_held_test_allowed": false
+  },
+  "baseline": {
+    "prediction_threshold": 0.719,
+    "threshold_provenance": "released M20 competition configuration, not selected by V3",
+    "postprocess": "frozen effective C00 before atomic component construction",
+    "effective_c00_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "fixed_config_overrides": [
+      "TEST.prediction_threshold=0.719",
+      "TEMPORAL_FRAME.temporal_frame_enabled=false",
+      "TEMPORAL_MEMORY.temporal_memory_enabled=true",
+      "TEMPORAL_MEMORY.temporal_memory_sequence_length=16",
+      "TEMPORAL_MEMORY.temporal_memory_sparse_weight=0.0",
+      "TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true",
+      "POSTPROCESS.p0_enabled=true",
+      "POSTPROCESS.p0_spatial_radius=2",
+      "POSTPROCESS.p0_temporal_bin_size=50",
+      "POSTPROCESS.p0_temporal_radius_bins=1",
+      "POSTPROCESS.p0_min_cluster_events=3",
+      "POSTPROCESS.p0_min_duration_bins=5",
+      "POSTPROCESS.p0c_high_confidence_recovery_enabled=true",
+      "POSTPROCESS.p0c_retain_min_score=0.95",
+      "POSTPROCESS.p0c_density_retain_enabled=false",
+      "POSTPROCESS.p0c_density_event_count_cutoff=100000",
+      "POSTPROCESS.p0c_density_retain_min_score=0.97",
+      "POSTPROCESS.p0b_enabled=false",
+      "POSTPROCESS.p18_score_track_recovery_enabled=true",
+      "POSTPROCESS.p18_event_count_cutoff=1",
+      "POSTPROCESS.p18_max_event_count=35000",
+      "POSTPROCESS.p18_candidate_floor=0.53",
+      "POSTPROCESS.p18_spatial_radius=5",
+      "POSTPROCESS.p18_temporal_bin_size=50",
+      "POSTPROCESS.p18_max_link_distance=8.0",
+      "POSTPROCESS.p18_max_gap_bins=1",
+      "POSTPROCESS.p18_min_track_bins=4",
+      "POSTPROCESS.p18_restore_mode=best",
+      "POSTPROCESS.p18_max_restore_events_per_component=0",
+      "POSTPROCESS.p6_density_threshold_enabled=true",
+      "POSTPROCESS.p6_event_count_cutoff=30000",
+      "POSTPROCESS.p6_low_density_threshold=0.718",
+      "POSTPROCESS.p6_high_density_threshold=0.719"
+    ]
+  },
+  "atomic_components": {
+    "construction": "connected components over all post-C00 threshold-positive unique (x,y,time-bin) cells",
+    "spatial_radius": 2,
+    "temporal_bin_size": 50,
+    "temporal_radius_bins": 1,
+    "event_multiplicity_preserved": true,
+    "action": "one binary keep-or-delete decision for every complete connected component",
+    "kept_component_scores": "bitwise copy of post-C00 float32 scores",
+    "deleted_component_scores": 0.0,
+    "post_deletion_rethreshold_or_postprocess": false,
+    "partial_component_deletion": "fail closed to exact identity and fail promotion"
+  },
+  "architecture": {
+    "module": "model/h2_atomic_component_deletion_net.py",
+    "class": "ActivityFirstComponentScorer",
+    "decoder_channels": 16,
+    "patch_channels": 21,
+    "patch_channel_order": ["M20_decoder0_16", "M20_base_logit", "negative_polarity", "positive_polarity", "activity", "component_query_mask"],
+    "patch_radius": 7,
+    "patch_size": 15,
+    "component_sequence": "one recentered patch per occupied component time-bin, packed variable length with no absolute time input",
+    "activity_adapter_inputs": ["negative_polarity", "positive_polarity", "activity", "component_query_mask"],
+    "semantic_adapter_inputs": ["M20_decoder0_16", "M20_base_logit", "component_query_mask"],
+    "activity_width": 4,
+    "semantic_width": 4,
+    "temporal_width": 8,
+    "temporal_aggregator": "one-layer bidirectional GRU with mean and max pooling",
+    "output": "one pure-FP logit per complete component; never an event or pixel score",
+    "trainable_parameter_count": 1705,
+    "source_name_path_hash_fold_label_target_id_or_absolute_time_input": false
+  },
+  "training": {
+    "group_seeds": {"g1_088_091": 67, "g3_095_098": 71},
+    "epochs": 16,
+    "batch_size": 16,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "gradient_clip_norm": 5.0,
+    "mixed_precision": true,
+    "loss": "weighted binary cross entropy for pure-FP component class",
+    "source_weighting": "each fit source contributes equal total component mass",
+    "class_weighting": "fit-group-derived balance to equal target-bearing and pure-FP mass",
+    "manual_class_multiplier": null,
+    "checkpoint_selection": "final epoch only",
+    "early_stopping_allowed": false,
+    "training_loss_or_fit_metric_checkpoint_selection_allowed": false,
+    "all_optimizer_step_diagnostics_persisted": true
+  },
+  "fit_only_cutoff": {
+    "score_direction": "larger means more likely pure FP",
+    "inner_oof_score_for_g1": "model trained only on g3",
+    "inner_oof_score_for_g3": "model trained only on g1",
+    "rule": "nextafter(maximum inner-OOF pure-FP score among all target-bearing components, +infinity)",
+    "delete_comparison": "pure_fp_probability >= strict_safe_cutoff",
+    "identity_if": ["no target-bearing calibration component", "no inner-OOF pure-FP component reaches the strict cutoff", "any inner-group or inner-pooled safety metric fails", "any atomic integrity check fails"],
+    "numeric_cutoff_hardcoded_or_hand_tuned": false,
+    "held_g2_statistics_used": false
+  },
+  "inference": {
+    "group_model_aggregation": "minimum pure-FP probability; both independent fit-group models must agree",
+    "component_batch_size": 64,
+    "full_stream_T160": true,
+    "activity_output_used_as_pixel_score": false,
+    "retained_M20_score_modified": false
+  },
+  "immutable_gpu_artifacts": {
+    "write_policy": "exclusive create, never overwrite; SHA-256 recorded in probe/training/held receipts",
+    "per_source_input_artifact": [
+      "M20 raw float32 event scores",
+      "C00 post float32 event scores",
+      "rich-cache reference scores",
+      "locations and event-to-component IDs",
+      "component event offsets and indices",
+      "full decoder/logit/polarity/activity/mask patch sequences",
+      "explicit raw negative-positive-activity patches"
+    ],
+    "per_source_score_artifact": [
+      "component IDs",
+      "scoring model group IDs",
+      "per-model pure-FP probabilities",
+      "post-activity-adapter component embeddings",
+      "fused component embeddings",
+      "consensus probability",
+      "fit-only derived cutoff and atomic deletion decision"
+    ],
+    "held_artifact_labels_or_target_ids": false,
+    "purpose": "enable mechanism audit without G1 reruns, held re-prediction, feature-route guessing, or posthoc grids"
+  },
+  "probe": {
+    "fit_source": "train_095.npz",
+    "optimizer_steps": 8,
+    "fresh_model": true,
+    "g2_held_array_read": false,
+    "must_verify": ["finite loss and gradient on all eight steps", "activity and semantic adapters reachable on step one", "M20 state hash unchanged", "component patch and atomic action invariants"],
+    "estimated_elapsed_seconds": [25, 60],
+    "estimated_peak_cuda_mib": 2300,
+    "estimated_host_patch_mib": 80
+  },
+  "promotion_gates": {
+    "inner_each_group_and_pooled": ["Score_not_lower", "IoU_not_lower", "Pd_not_lower", "Fa_not_higher", "TP_not_lower", "FP_not_higher", "CO_not_lower", "FC_not_higher"],
+    "held_g2": ["Score_not_lower", "IoU_not_lower", "Pd_not_lower", "Fa_not_higher", "TP_not_lower", "FP_not_higher", "CO_not_lower", "FC_not_higher", "atomic_integrity"],
+    "substantive_h2_score_gain": 0.02,
+    "failure_policy": "permanently eliminate V3; no G1/G3 retest and no parameter or cutoff adjustment"
+  },
+  "resource_budget": {
+    "formal_g2_fit_plus_single_held_evaluation_estimated_minutes": [3, 12],
+    "estimated_peak_cuda_mib": 2300,
+    "gpu_exclusivity_required": true
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260811_h2_atomic_component_deletion_g2_v3",
+    "no_clobber": true,
+    "checkpoint_contains": "two fresh group-model state dicts, fit-only cutoff, full inner grouped-OOF diagnostics, M20 and protocol provenance",
+    "held_report_contains": "paired Score/IoU/Pd/Fa and TP/FP/CO/FC, component decisions, bitwise and atomic integrity receipts",
+    "immutable_artifact_contains": "M20 raw/C00 post/activity raw/activity embedding/fused embedding/component IDs/probabilities/actions plus SHA-256"
+  }
+}

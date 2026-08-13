@@ -1,0 +1,178 @@
+{
+  "schema": "ev-uav-frozen-m20-h2-spatiotemporal-residual-refiner-oof-v1",
+  "created_local": "2026-08-11T11:00:00+08:00",
+  "status": "frozen_before_any_gpu_probe_training_or_held_fold_prediction",
+  "experiment_id": "h2_spatiotemporal_residual_refiner_oof_v1",
+  "objective": "learn a source-free H2 logit residual while released M20 remains byte-stable",
+  "scientific_scope": {
+    "dataset_split": "train_only",
+    "validation_read_allowed": false,
+    "test_read_allowed": false,
+    "platform_submission_allowed": false,
+    "source_name_feature_allowed": false,
+    "absolute_time_feature_allowed": false,
+    "labels_and_target_ids": "loss_and_held_metrics_only_never_refiner_inputs",
+    "released_m20_pretraining_exposure_disclosure": "M20 was previously exposed to the eleven train sources; OOF estimates transfer of the new residual head, not fold-clean base-model generalization"
+  },
+  "released_m20": {
+    "workspace_relative_path": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+    "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "state_tensor_count": 89,
+    "parameter_count": 1924716,
+    "all_parameters_frozen": true,
+    "forced_eval_mode": true,
+    "dense_output": "base.head decoder0 logit map before sigmoid",
+    "identity_at_refiner_initialization": "bitwise"
+  },
+  "input_only_route": {
+    "domain": "H2",
+    "rule": "event_count > 200000",
+    "cutoff_provenance": "pre_existing_H2_domain_definition_not_selected_from_this_experiment",
+    "model_inputs": [
+      "released_M20_decoder0_16_channels",
+      "released_M20_dense_logit",
+      "centre_bin_negative_polarity_count_image",
+      "centre_bin_positive_polarity_count_image",
+      "centre_bin_total_activity_image"
+    ],
+    "non_H2_policy": "released_M20_identity",
+    "file_name_path_hash_fold_or_source_id_routing": false
+  },
+  "h2_sources": {
+    "train_088.npz": {"event_count": 399750, "sha256": "29d5bbc31d23b38a91d349896a530b2d416224db4b464b1ae45c355b94b1ec10"},
+    "train_089.npz": {"event_count": 405722, "sha256": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb"},
+    "train_090.npz": {"event_count": 422448, "sha256": "5de16df85ee466b7ee1d8ecbf465a8cbfe64d2029b7b7a895cc181ca75559102"},
+    "train_091.npz": {"event_count": 423790, "sha256": "7314cdd6627d9bf538656abc7e098b8fd21e79038591e5a941187844eb7aed7e"},
+    "train_092.npz": {"event_count": 595519, "sha256": "9b8707627ac1bbcd471bbff7fc9b02fafbe5c6dd0f54857dbb158fb8916eeca6"},
+    "train_093.npz": {"event_count": 620778, "sha256": "460e45e7bc5d3df8a1a1dbd8a19427c95d130937ec3e4912c2dda3f693456338"},
+    "train_094.npz": {"event_count": 614725, "sha256": "8c5f985c75abeac73cc87e3419deb461ba508fc16fe1411b98b4f70f15458eec"},
+    "train_095.npz": {"event_count": 365730, "sha256": "b86e9b764b3bd9e151d9657a4a0b5c3255e0296882c3b367131f31443bf2eeb3"},
+    "train_096.npz": {"event_count": 625178, "sha256": "7c136b7dbb8ad85ddc43c50ef2886c062ac9ab7e9927951ecc6c67e7ea397a7c"},
+    "train_097.npz": {"event_count": 619767, "sha256": "3583cd09272702cf1da8caf76f7b802856c41394555b0c990124c08515d16ac5"},
+    "train_098.npz": {"event_count": 624246, "sha256": "0a60a0dc6f80258ec428f97b30e2be683fd2d35391b0a76801ca4c8a3585ee13"}
+  },
+  "folds": [
+    {
+      "fold_id": "hold_g1",
+      "held": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz"],
+      "fit": ["train_092.npz", "train_093.npz", "train_094.npz", "train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+    },
+    {
+      "fold_id": "hold_g2",
+      "held": ["train_092.npz", "train_093.npz", "train_094.npz"],
+      "fit": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz", "train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+    },
+    {
+      "fold_id": "hold_g3",
+      "held": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"],
+      "fit": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz", "train_092.npz", "train_093.npz", "train_094.npz"]
+    }
+  ],
+  "architecture": {
+    "wrapper_module": "model/h2_spatiotemporal_residual_refiner.py",
+    "hidden_channels": 32,
+    "temporal_receptive_field_bins": 3,
+    "spatial_kernel": 3,
+    "normalization": "none",
+    "output_projection_initialization": "all_zero",
+    "candidate_count": 1,
+    "architecture_search_allowed": false
+  },
+  "training": {
+    "seed": 59,
+    "epochs": 3,
+    "sequence_length": 16,
+    "views_per_fit_source_per_epoch": 8,
+    "batch_size": 1,
+    "positive_frame_probability": 0.75,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "scheduler": "none",
+    "gradient_clip_norm": 5.0,
+    "mixed_precision": true,
+    "loss": {
+      "classification": "mean(positive_softplus)+M20_probability_weighted_mean(negative_softplus), then arithmetic mean",
+      "positive_event_retention": "mean(square(relu(base_logit-refined_logit)))",
+      "target_frame_retention": "mean(square(relu(base_positive_group_max-refined_positive_group_max)))",
+      "total": "classification + positive_event_retention + target_frame_retention",
+      "temporal_sequence_boundary_events_in_loss": false,
+      "uses_prediction_threshold": false,
+      "uses_held_statistics": false,
+      "loss_weight_grid_allowed": false
+    },
+    "checkpoint_selection": "final_epoch_only",
+    "early_stopping_allowed": false,
+    "held_fold_access_before_final_checkpoint": false
+  },
+  "probe": {
+    "fold": "hold_g1",
+    "fit_sources_only": true,
+    "optimizer_steps": 8,
+    "fresh_zero_initialized_refiner": true,
+    "held_prediction_allowed": false,
+    "must_report_before_execution": ["GPU_free_memory", "estimated_peak_memory", "estimated_runtime"]
+  },
+  "evaluation": {
+    "held_complete_full_stream": true,
+    "temporal_halo_bins": 1,
+    "prediction_threshold": 0.719,
+    "threshold_use": "paired_evaluation_only_inherited_from_released_M20",
+    "postprocess": "effective_C00_identical_for_identity_and_candidate",
+    "effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "fixed_config_overrides": [
+      "TEST.prediction_threshold=0.719",
+      "TEMPORAL_FRAME.temporal_frame_enabled=false",
+      "TEMPORAL_MEMORY.temporal_memory_enabled=true",
+      "TEMPORAL_MEMORY.temporal_memory_sequence_length=16",
+      "TEMPORAL_MEMORY.temporal_memory_sparse_weight=0.0",
+      "TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true",
+      "POSTPROCESS.p0_enabled=true",
+      "POSTPROCESS.p0_spatial_radius=2",
+      "POSTPROCESS.p0_temporal_bin_size=50",
+      "POSTPROCESS.p0_temporal_radius_bins=1",
+      "POSTPROCESS.p0_min_cluster_events=3",
+      "POSTPROCESS.p0_min_duration_bins=5",
+      "POSTPROCESS.p0c_high_confidence_recovery_enabled=true",
+      "POSTPROCESS.p0c_retain_min_score=0.95",
+      "POSTPROCESS.p0c_density_retain_enabled=false",
+      "POSTPROCESS.p0c_density_event_count_cutoff=100000",
+      "POSTPROCESS.p0c_density_retain_min_score=0.97",
+      "POSTPROCESS.p0b_enabled=false",
+      "POSTPROCESS.p18_score_track_recovery_enabled=true",
+      "POSTPROCESS.p18_event_count_cutoff=1",
+      "POSTPROCESS.p18_max_event_count=35000",
+      "POSTPROCESS.p18_candidate_floor=0.53",
+      "POSTPROCESS.p18_spatial_radius=5",
+      "POSTPROCESS.p18_temporal_bin_size=50",
+      "POSTPROCESS.p18_max_link_distance=8.0",
+      "POSTPROCESS.p18_max_gap_bins=1",
+      "POSTPROCESS.p18_min_track_bins=4",
+      "POSTPROCESS.p18_restore_mode=best",
+      "POSTPROCESS.p18_max_restore_events_per_component=0",
+      "POSTPROCESS.p6_density_threshold_enabled=true",
+      "POSTPROCESS.p6_event_count_cutoff=30000",
+      "POSTPROCESS.p6_low_density_threshold=0.718",
+      "POSTPROCESS.p6_high_density_threshold=0.719"
+    ],
+    "paired_counts_required": ["true_positive_events", "false_positive_events", "detected_target_frames", "target_frames", "false_components"],
+    "paired_metrics_required": ["Score", "IoU", "Pd", "Fa", "accuracy"],
+    "success_interpretation": "H2 local Score gain should approach or exceed 0.02; smaller gains are insufficient for the full-score 0.9700 objective",
+    "selection_from_held_metrics_allowed": false
+  },
+  "promotion_gates": {
+    "every_fold_score_not_lower": true,
+    "every_fold_iou_not_lower": true,
+    "every_fold_pd_not_lower": true,
+    "every_fold_fa_not_higher": true,
+    "every_fold_detected_target_frames_not_lower": true,
+    "every_fold_true_positive_events_not_lower": true,
+    "pooled_H2_score_gain_minimum_for_continuation": 0.02
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260811_h2_spatiotemporal_residual_refiner_oof_v1",
+    "no_clobber": true,
+    "default_core_or_submission_change_allowed": false,
+    "checkpoint_contains": "refiner_state_only_plus_parent_and_protocol_provenance"
+  }
+}

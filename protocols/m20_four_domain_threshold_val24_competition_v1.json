@@ -1,0 +1,130 @@
+{
+  "schema": "ev-uav-m20-four-domain-threshold-val24-competition-science-v1",
+  "status": "declared_after_resource_audit_and_six_point_val_h2_runtime_benchmark_before_formal_grid_scan",
+  "created_utc": "2026-08-10T18:20:00Z",
+  "evidence_class": "validation_aware_competition_model_selection_not_independent_held_or_unbiased_evidence",
+  "objective": {
+    "primary": "maximize the official full-Val24 Score by changing only the M20 threshold independently for middle, H1, and H2 while keeping low at the released golden threshold",
+    "target_full_val24_score_delta": 0.0005,
+    "if_target_not_met": "report the exact maximum on the frozen finite grid and do not imply a continuum-wide upper bound"
+  },
+  "adaptive_disclosure": {
+    "validation_labels_and_scores_may_be_used_for_competition_model_selection": true,
+    "independent_held_or_unbiased_claim_allowed": false,
+    "prior_validation_results_were_known": true,
+    "known_prior_global_scan": "The user disclosed that the global 0.715-0.725 scan had an optimum at 0.719.",
+    "pre_protocol_runtime_benchmark": {
+      "purpose": "estimate CPU cost and verify the existing evaluator API",
+      "source": "val_023 M20 raw cache under official C00",
+      "thresholds": [0.715, 0.717, 0.719, 0.721, 0.723, 0.725],
+      "observed_counts": [
+        {"threshold": 0.715, "true_positive_events": 5196, "false_positive_events": 432, "false_components": 304, "detected_target_frames": 377},
+        {"threshold": 0.717, "true_positive_events": 5192, "false_positive_events": 432, "false_components": 304, "detected_target_frames": 377},
+        {"threshold": 0.719, "true_positive_events": 5190, "false_positive_events": 394, "false_components": 278, "detected_target_frames": 377},
+        {"threshold": 0.721, "true_positive_events": 5163, "false_positive_events": 393, "false_components": 277, "detected_target_frames": 377},
+        {"threshold": 0.723, "true_positive_events": 5158, "false_positive_events": 391, "false_components": 275, "detected_target_frames": 377},
+        {"threshold": 0.725, "true_positive_events": 5154, "false_positive_events": 387, "false_components": 273, "detected_target_frames": 377}
+      ]
+    },
+    "formal_grid_must_not_change_after_this_protocol": true
+  },
+  "split_policy": {
+    "train_allowed": true,
+    "validation_allowed": true,
+    "test_files_labels_caches_reports_or_platform_feedback_allowed": false,
+    "training_or_model_inference_allowed": false,
+    "platform_submission_allowed": false
+  },
+  "inputs": {
+    "m20_val24_raw_cache": {
+      "workspace_relative_path": "experiments/20260810_baseline_fine_sweep/m20_val24_raw.pt",
+      "sha256": "6c9b4a8e33217aac7a05c78590a7feb6db6e6fc332b6411d7603264687710304"
+    },
+    "m10_val24_raw_cache_for_fixed_low_domain": {
+      "workspace_relative_path": "experiments/20260810_dacc_v2_projection_only_seed49/replay/m10_val24_raw.pt",
+      "sha256": "96a9dfa8833e6f609d29f4db9d8f7196c84c7e92c7026cce734b97ddf133622f"
+    },
+    "golden_val24_report": {
+      "workspace_relative_path": "results/submission_m20_golden/offline_score_report.json",
+      "sha256": "da6004ddd22731b8e848c9ed0c561961abbc04b4e3f66cd07b1e085d26f9f383"
+    },
+    "wfull_v2_validation_report_for_frozen_route_map_and_golden_counts": {
+      "workspace_relative_path": "experiments/20260811_metric_aux_task_arithmetic_wfull_val24_v2_recovery/frozen_validation_report.json",
+      "sha256": "cf1dd8e3c70f05ba0c0e742f9caba66d6ff6bb996c4122355173c811a713a30f"
+    },
+    "m20_train_cache_manifest": {
+      "workspace_relative_path": "experiments/20260810_component_reranker_crosssource_v1/train_cache_gt30000/manifest.json",
+      "sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+      "schema": "ev-uav-component-reranker-train-cache-v1",
+      "dataset_split": "train",
+      "base_checkpoint_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+      "official_train_source_manifest_sha256": "e94aaeae451113943a464feec7b1500968601a835ce8eeee914129ed2456625f"
+    },
+    "raw_train_root_for_input_only_route_recheck": {
+      "workspace_relative_path": "datasets/EV-UAV-Challenge2/train",
+      "allowed_fields": ["event_count", "polarity"],
+      "labels_are_used_only_from_the_bound_train_score_cache_for_official_metrics": true
+    }
+  },
+  "bound_code_sha256": {
+    "replay_temporal_memory_validation.py": "a3c8ab4966663bd9e67416ae7b16b9a9c5abdcccbaa3e7e2f93f9b21a6a1dbdd",
+    "train_component_reranker.py": "4cd17f1778fd81de99fb053f038268bcf0e45e53ff80cbd3638f9c28f7bac44d",
+    "evaluate_metric_aux_task_arithmetic_validation.py": "0dae6d90d3a70837d1c01a0798743135d22bd4b99b4515340e1d4e34c74e3a95",
+    "crossfit_component_reranker.py": "ec4d0af1abf8dab88037d8731ad1b142aa8cdb76511287d866113865d70e9561",
+    "utils/challenge_eval.py": "a09e9a4b74abb06864e4551778addd624e53654041c98a41dbe61a1f67fbc952",
+    "utils/eval.py": "cb9de56b54a7153d80a2fd32432188665e830e0a9b945965f2cbd6765bb354e5",
+    "utils/postprocess.py": "a43e2a22947f5307cdb01b810a4f1dc8d4fb624b14bd068baf1e9087ca5d1aa4"
+  },
+  "route_policy": {
+    "inputs_only": true,
+    "low": "event_count<=30000",
+    "middle": "30000<event_count<=200000",
+    "h1": "event_count>200000 and complete-video polarity minority fraction<0.20",
+    "h2": "event_count>200000 and complete-video polarity minority fraction>=0.20",
+    "expected_val_population": {"low": 10, "middle": 12, "h1": 1, "h2": 1},
+    "expected_val_h1": ["val_015.npz"],
+    "expected_val_h2": ["val_023.npz"],
+    "expected_train_cache_population": {"middle": 39, "h1": 4, "h2": 11},
+    "expected_train_h1": ["train_044.npz", "train_045.npz", "train_046.npz", "train_047.npz"],
+    "expected_train_h2": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz", "train_092.npz", "train_093.npz", "train_094.npz", "train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+  },
+  "threshold_search": {
+    "fixed_low_threshold": 0.718,
+    "released_m20_threshold": 0.719,
+    "scanned_domains": ["middle", "h1", "h2"],
+    "grid": {
+      "integer_start": 7100,
+      "integer_stop_inclusive": 7300,
+      "integer_scale": 10000,
+      "step": 0.0001,
+      "count": 201
+    },
+    "one_at_a_time_required": true,
+    "combine_each_val_one_at_a_time_optimum_required": true,
+    "exhaustive_joint_cartesian_grid_analysis_required": true,
+    "train_joint_grid_analysis_required": true,
+    "selection_tie_break": ["highest_official_score", "smallest_L1_distance_to_released_thresholds", "lexicographically_lower_threshold_tuple"],
+    "boundary_hit_must_be_reported": true,
+    "no_threshold_evaluation_outside_the_frozen_grid": true
+  },
+  "metrics": {
+    "postprocess": "official C00 structure and all non-threshold settings unchanged; only the decision threshold is scanned",
+    "released_threshold_effective_c00_canonical_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "nonreleased_threshold_canonical_identity_claimed_equal_to_released_c00": false,
+    "score_formula": "0.4*Pd + 0.3*exp(-10000*Fa) + 0.2*IoU + 0.1*Acc",
+    "official_float32_iou_and_acc_semantics": true,
+    "sufficient_counts": ["true_positive_events", "false_positive_events", "positive_events", "detected_target_frames", "target_frames", "false_components", "frame_count"]
+  },
+  "robustness_intervals": {
+    "common_score_nondegrading": "contiguous grid thresholds where both the train full-cache one-domain Score and full-Val24 one-domain Score are not below their respective released-threshold baselines",
+    "common_official_safety": "common_score_nondegrading plus Pd and IoU not lower and Fa not higher on both train and validation",
+    "grid_contiguity": "adjacent integer ticks differ by exactly one"
+  },
+  "outputs": {
+    "workspace_relative_directory": "experiments/20260811_m20_four_domain_threshold_val24_competition_v1",
+    "curve_report": "threshold_curves.json",
+    "summary_report": "threshold_scan_report.json",
+    "no_clobber": true,
+    "default_submission_or_checkpoint_change_allowed": false
+  }
+}

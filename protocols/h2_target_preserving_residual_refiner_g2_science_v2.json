@@ -1,0 +1,180 @@
+{
+  "schema": "ev-uav-frozen-m20-h2-target-preserving-residual-refiner-g2-v2",
+  "created_local": "2026-08-11T11:25:00+08:00",
+  "status": "frozen_after_g1_development_evidence_before_any_v2_gpu_or_g2_held_prediction",
+  "experiment_id": "h2_target_preserving_residual_refiner_g2_v2",
+  "development_evidence": {
+    "use": "mechanism_diagnosis_only_not_G1_retest_or_candidate_selection",
+    "training_result": {
+      "workspace_relative_path": "experiments/20260811_h2_spatiotemporal_residual_refiner_oof_v1/formal_training/hold_g1/training_result.json",
+      "sha256": "272060540ec4c38754b9443b059a8df65fa963c400bb99792ee7f76c7d513164",
+      "available_step_detail": "first_step_last_step_and_global_mean_only",
+      "full_168_step_log_available": false
+    },
+    "checkpoint": {
+      "workspace_relative_path": "experiments/20260811_h2_spatiotemporal_residual_refiner_oof_v1/formal_training/hold_g1/final_refiner.pt",
+      "sha256": "55135398d671cc4e336c5d158177a3a5dbde96e1758567e383f85dbb6e4df06d",
+      "output_projection_bias": -0.017652319744229317,
+      "output_projection_weight_mean": -0.005722382105886936
+    },
+    "paired_evaluation": {
+      "workspace_relative_path": "experiments/20260811_h2_spatiotemporal_residual_refiner_oof_v1/held_train_evaluation/hold_g1/paired_evaluation.json",
+      "sha256": "8f6395f1b7d1b5a64a1639b92d5aba3bdc06e45dbd992001633e4ce25c3f72c5",
+      "per_event_scores_persisted": false,
+      "base_threshold_positive_events": 20235,
+      "candidate_threshold_positive_events": 17708,
+      "threshold_positive_event_delta": -2527,
+      "threshold_positive_event_relative_delta": -0.12488262910798122,
+      "base_C00_output_positive_events": 14980,
+      "candidate_C00_output_positive_events": 13791,
+      "base_C00_retention_fraction": 0.7403014578700272,
+      "candidate_C00_retention_fraction": 0.7788005421278518,
+      "base_threshold_component_count": 2139,
+      "candidate_threshold_component_count": 1546,
+      "correct_object_delta_by_source_088_to_091": [-3, -12, -4, -1],
+      "pooled_delta": {
+        "score": 0.011575804895540776,
+        "true_positive_events": -300,
+        "false_positive_events": -889,
+        "correct_objects": -20,
+        "false_components": -415
+      }
+    },
+    "mechanism_conclusion": {
+      "primary": "systematic_pre_C00_logit_suppression_and_threshold_crossing",
+      "not_supported_as_primary": "C00_induced_trajectory_fragmentation",
+      "evidence": "all_four_sources_lost_threshold_positive_events_and_TP_while_C00_retention_fraction_increased",
+      "limitation": "per_event_scores_and_complete_168_step_records_were_not_persisted_so_no_claim_of_exact_lost_target_trajectory_reconstruction"
+    }
+  },
+  "science_scope": {
+    "dataset": "train_only_H2",
+    "validation_read_allowed": false,
+    "test_read_allowed": false,
+    "G1_reprediction_or_retest_allowed": false,
+    "G1_used_for_v2_evaluation": false,
+    "platform_submission_allowed": false,
+    "source_name_path_hash_fold_target_id_or_label_inference_feature_allowed": false,
+    "released_M20_pretraining_exposure_disclosure": "OOF tests only the new V2 head transfer because released M20 previously saw all train sources"
+  },
+  "source_manifest_inheritance": {
+    "protocol": "EVC-work/protocols/h2_spatiotemporal_residual_refiner_oof_science_v1.json",
+    "sha256": "7edec461f2ccc8047156f08c57389319a5defd59d0afcea69cbfcf32e81d2207",
+    "released_M20_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849"
+  },
+  "single_unseen_fold": {
+    "fold_id": "hold_g2",
+    "selection_timing": "fixed_before_any_V2_G2_prediction_or_metric_access",
+    "exposure_disclosure": "train_092_to_094_were_fit_members_in_V1_G1_but_no_G2_prediction_or_metric_was_observed; V2_is_fresh_zero_gate_initialization_and_excludes_them_from_fit",
+    "fit": [
+      "train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz",
+      "train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"
+    ],
+    "held": ["train_092.npz", "train_093.npz", "train_094.npz"],
+    "G3_held_metrics_and_predictions_reserved_unread": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+  },
+  "architecture": {
+    "module": "model/h2_target_preserving_residual_refiner.py",
+    "decoder_channels": 16,
+    "hidden_channels_each_branch": 32,
+    "trainable_parameter_count": 6532,
+    "independent_branches": ["nonnegative_protection", "nonnegative_suppression"],
+    "combined_residual": "expm1(projected_nonnegative_protection_gate)*softplus(protection_logit)-expm1(projected_nonnegative_suppression_gate)*softplus(suppression_logit)",
+    "gate_initialization": 0.0,
+    "gate_projection_after_each_step": "clamp_raw_gate_to_nonnegative",
+    "identity_at_initialization": "bitwise_released_M20",
+    "candidate_count": 1,
+    "architecture_grid_allowed": false
+  },
+  "input_only_route": {
+    "domain": "event_count > 200000 AND complete_input_polarity_minority_fraction >= 0.20",
+    "event_count_cutoff_exclusive": 200000,
+    "polarity_minority_cutoff": 0.20,
+    "cutoff_provenance": "pre_existing_train_only_H1_H2_route_with_wide_observed_gap_not_selected_from_G1_G2_val_or_test",
+    "evidence_protocol": {
+      "workspace_relative_path": "EVC-work/protocols/high_density_dual_expert_grouped_oof_science_v1.json",
+      "sha256": "a4f3ffaaf5a887fade2f47e08d32d5a716b31d2251bdbb0abcba9ae9b4d47d42",
+      "H1_train_range": [0.011984213619951297, 0.10165402429056912],
+      "H2_train_range": [0.46160600375234523, 0.4661295986649011]
+    },
+    "frozen_H2_polarity_minority_fraction": {
+      "train_088.npz": 0.46160600375234523,
+      "train_089.npz": 0.4621662123325824,
+      "train_090.npz": 0.4629185130477597,
+      "train_091.npz": 0.4625899620094858,
+      "train_092.npz": 0.4637820119929003,
+      "train_093.npz": 0.4661295986649011,
+      "train_094.npz": 0.4645068933262841,
+      "train_095.npz": 0.46401170262215297,
+      "train_096.npz": 0.46380550819126715,
+      "train_097.npz": 0.4654604068948492,
+      "train_098.npz": 0.4650842776725842
+    },
+    "inputs": ["M20_decoder0", "M20_dense_logit", "centre_negative_polarity", "centre_positive_polarity", "centre_activity"],
+    "non_H2": "released_M20_bitwise_identity",
+    "source_name_or_path_used": false
+  },
+  "training": {
+    "seed": 61,
+    "epochs": 3,
+    "sequence_length": 16,
+    "views_per_fit_source_per_epoch": 8,
+    "optimizer_steps": 192,
+    "batch_size": 1,
+    "positive_frame_probability": 0.75,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "gradient_clip_norm": 5.0,
+    "mixed_precision": true,
+    "checkpoint_selection": "final_epoch_only",
+    "early_stopping_allowed": false,
+    "loss": {
+      "classification": "same_balanced_fit_only_event_objective_as_V1",
+      "constraints": [
+        "mean_relu(base_positive_event_logit-refined_positive_event_logit)",
+        "mean_per_target_time_group_relu(base_positive_group_max-refined_positive_group_max)"
+      ],
+      "dynamic_multipliers_initial": {"positive_event": 1.0, "target_group": 1.0},
+      "dual_update": "unit_step_projected_dual_ascent_after_every_optimizer_step",
+      "augmented_term": "one_half_sum_of_squared_constraints",
+      "prediction_threshold_used": false,
+      "held_statistics_used": false,
+      "loss_weight_or_dual_step_grid_allowed": false
+    },
+    "every_step_diagnostics_must_be_persisted": true,
+    "G2_held_access_before_final_checkpoint": false
+  },
+  "probe": {
+    "optimizer_steps": 8,
+    "fit_sources_only": true,
+    "G2_held_arrays_read": false,
+    "G1_or_G3_prediction_allowed": false,
+    "fresh_zero_gate_model": true
+  },
+  "evaluation": {
+    "fold": "hold_g2_only",
+    "complete_full_stream_T160": true,
+    "temporal_halo_bins": 1,
+    "prediction_threshold": 0.719,
+    "threshold_use": "paired_evaluation_only_inherited_from_released_M20",
+    "postprocess": "same_effective_C00_for_baseline_and_candidate",
+    "effective_C00_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "G1_or_G3_evaluation_allowed": false
+  },
+  "promotion_gates": {
+    "score_not_lower": true,
+    "iou_not_lower": true,
+    "pd_not_lower": true,
+    "fa_not_higher": true,
+    "correct_objects_not_lower": true,
+    "true_positive_events_not_lower": true,
+    "H2_score_gain_minimum": 0.02
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260811_h2_target_preserving_residual_refiner_g2_v2",
+    "no_clobber": true,
+    "default_core_or_submission_change_allowed": false,
+    "checkpoint_contains": "V2_refiner_only_plus_dual_and_parent_protocol_provenance"
+  }
+}

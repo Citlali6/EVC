@@ -264,6 +264,7 @@ TEMPORAL_MEMORY:
   temporal_memory_sequence_length: 16
   temporal_memory_train_views_per_video: 2
   temporal_memory_train_min_event_count_exclusive: null
+  temporal_memory_train_source_name_include: null
   temporal_memory_positive_frame_probability: 0.75
   # Train-label-only sampling for sparse target-time groups. Disabled by
   # default so released runs preserve their exact center-bin RNG sequence.

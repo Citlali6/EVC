@@ -2034,6 +2034,11 @@ def build_temporal_memory_train_dataset(config):
             'temporal_memory_train_min_event_count_exclusive',
             None,
         ),
+        source_name_include=getattr(
+            config,
+            'temporal_memory_train_source_name_include',
+            None,
+        ),
         sparse_target_support_sampling_enabled=getattr(
             config,
             'temporal_memory_sparse_target_support_sampling_enabled',

@@ -259,6 +259,7 @@ class TemporalMemoryTrainDataset(Dataset):
         density_bucket_boundaries=None,
         density_bucket_views=None,
         min_event_count_exclusive=None,
+        source_name_include=None,
         sparse_target_support_sampling_enabled=False,
         sparse_target_support_max_events=3,
         sparse_target_support_probability=0.75,
@@ -282,6 +283,18 @@ class TemporalMemoryTrainDataset(Dataset):
         self.min_event_count_exclusive = normalize_min_event_count_exclusive(
             min_event_count_exclusive
         )
+        if source_name_include is not None:
+            if isinstance(source_name_include, str):
+                source_name_include = [
+                    str(name).strip()
+                    for name in source_name_include.split(",")
+                    if str(name).strip()
+                ]
+            else:
+                source_name_include = [
+                    str(name) for name in source_name_include
+                ]
+        self.source_name_include = source_name_include
         self.sparse_target_support_sampling_enabled = bool(
             sparse_target_support_sampling_enabled
         )
@@ -374,6 +387,19 @@ class TemporalMemoryTrainDataset(Dataset):
                         self.root,
                     )
                 )
+        if self.source_name_include is not None:
+            included = set(self.source_name_include)
+            retained_by_name = [
+                path for path in self.file_paths
+                if path.name in included
+            ]
+            if not retained_by_name:
+                raise RuntimeError(
+                    'Source-name filter retained no npz files in {}.'.format(
+                        self.root,
+                    )
+                )
+            self.file_paths = retained_by_name
         if self.context_bins < 1 or self.context_bins % 2 == 0:
             raise ValueError('context_bins must be a positive odd integer.')
         if self.sequence_length <= 0:

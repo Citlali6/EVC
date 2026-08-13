@@ -1,0 +1,108 @@
+{
+  "schema": "ev-uav-frame-set-graph-deletion-f5-smoke-science-v1",
+  "status": "frozen_before_any_frame_set_fit_or_f5_evaluation",
+  "dataset_scope": "train-only 54 sources with event_count > 30000",
+  "purpose": "single CPU feasibility smoke for a joint per-50-bin frame-set deletion model",
+  "adaptive_disclosure": "created after independent-component and 92-feature contextual deletion heads showed no safe F5 signal",
+  "forbidden": [
+    "validation data or reports",
+    "test data",
+    "GPU",
+    "source name, numeric source index, path, hash, or fold id as a model feature",
+    "threshold, model, feature, or route search on F5",
+    "default configuration or submission changes"
+  ],
+  "inputs": {
+    "cache_manifest_sha256": "05a707dcfeb8487fafdb99599abfff81b452c6fac9d1938da47f711097257f82",
+    "c00_protocol_sha256": "babd85216e83c3e6324d2ddc06d39c0c38669e4a7da6f65ea5884dca6ecfb9d2",
+    "released_checkpoint_sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849"
+  },
+  "source_groups": {
+    "block_000_014": [
+      "train_000.npz", "train_001.npz", "train_002.npz", "train_003.npz", "train_004.npz",
+      "train_005.npz", "train_006.npz", "train_007.npz", "train_008.npz", "train_009.npz",
+      "train_010.npz", "train_011.npz", "train_012.npz", "train_013.npz", "train_014.npz"
+    ],
+    "block_028_032": [
+      "train_028.npz", "train_029.npz", "train_030.npz", "train_031.npz", "train_032.npz"
+    ],
+    "block_040_047": [
+      "train_040.npz", "train_041.npz", "train_042.npz", "train_043.npz",
+      "train_044.npz", "train_045.npz", "train_046.npz", "train_047.npz"
+    ],
+    "block_059_074": [
+      "train_059.npz", "train_060.npz", "train_061.npz", "train_062.npz", "train_063.npz",
+      "train_064.npz", "train_065.npz", "train_067.npz", "train_068.npz", "train_069.npz",
+      "train_070.npz", "train_071.npz", "train_072.npz", "train_073.npz", "train_074.npz"
+    ],
+    "block_088_098": [
+      "train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz", "train_092.npz",
+      "train_093.npz", "train_094.npz", "train_095.npz", "train_096.npz", "train_097.npz",
+      "train_098.npz"
+    ]
+  },
+  "outer_held_group": "block_088_098",
+  "inner_design": "leave one of F1-F4 out; fit the single frozen model on the other three; pool only inner-held frame probabilities",
+  "prediction_unit": "all retained C00 components in one 50-bin frame share one keep probability and one deletion decision",
+  "graph_contract": {
+    "component_topology": "C00-positive per-bin spatial radius 1 components",
+    "temporal_bin_size": 50,
+    "nearest_neighbor_engine": "scipy.spatial.cKDTree with bounded k=1 or k=2 queries",
+    "path_edge": "one nearest successor in the next bin within 6 pixels",
+    "context_distance": 12.0,
+    "complexity": "O(C log C + E) with bounded nearest-neighbor output; no dense C-by-C matrix"
+  },
+  "feature_names": [
+    "log_video_events",
+    "log_frame_component_count",
+    "log_frame_component_events",
+    "frame_score_top1",
+    "frame_score_top2",
+    "frame_score_top_gap",
+    "frame_score_mean",
+    "frame_score_std",
+    "frame_score_hhi",
+    "frame_largest_size_share",
+    "frame_compactness_mean",
+    "frame_bbox_span_diagonal_norm",
+    "frame_nn_distance_mean_norm",
+    "frame_nn_distance_min_norm",
+    "graph_prev_match_r6_fraction",
+    "graph_next_match_r6_fraction",
+    "graph_bidirectional_r12_fraction",
+    "graph_prev_distance_mean_norm",
+    "graph_next_distance_mean_norm",
+    "graph_score_residual_mean",
+    "graph_velocity_residual_mean_norm",
+    "graph_path_max_norm",
+    "graph_path_ge3_fraction",
+    "relative_component_count_percentile",
+    "relative_top_score_percentile",
+    "relative_total_events_percentile"
+  ],
+  "feature_inputs": "released raw-score-derived C00 scores, locations, component membership, and complete-video event_count only",
+  "label_use": "train labels define whether a frame contains any retained target-support component; labels and target ids never enter features",
+  "model": {
+    "family": "HistGradientBoostingClassifier",
+    "learning_rate": 0.06,
+    "max_iter": 120,
+    "max_leaf_nodes": 15,
+    "max_depth": 3,
+    "min_samples_leaf": 24,
+    "l2_regularization": 4.0,
+    "random_state": 20260811,
+    "candidate_count": 1
+  },
+  "selection_rule": "minimum inner-family OOF probability among target-support frames; nonidentity selected only if every inner fold passes all official safety gates and pooled FP plus false-components strictly decrease",
+  "f5_access": "F5 labels and metrics are opened only after the single model, inner OOF threshold, and identity-versus-nonidentity decision are fixed from F1-F4",
+  "safety_gates": {
+    "every_inner_and_outer_score_not_lower": true,
+    "every_inner_and_outer_iou_not_lower": true,
+    "every_inner_and_outer_pd_not_lower": true,
+    "every_inner_and_outer_fa_not_higher": true,
+    "every_inner_and_outer_correct_objects_not_lower": true,
+    "pooled_inner_and_outer_false_positive_events_strictly_lower": true,
+    "pooled_inner_and_outer_false_components_strictly_lower": true
+  },
+  "stop_rule": "if nonidentity is not selected by F1-F4 or the selected candidate fails any F5 gate or does not delete both FP events and false components, stop without full five-fold OOF"
+}

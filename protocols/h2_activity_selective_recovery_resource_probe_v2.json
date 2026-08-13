@@ -1,0 +1,172 @@
+{
+  "schema": "ev-uav-h2-activity-selective-recovery-resource-probe-v2",
+  "created_local": "2026-08-11",
+  "status": "frozen_cpu_resource_design_awaiting_separate_gpu_authorization",
+  "role": "resource_and_mechanical_evidence_only",
+  "formal_scientific_evidence": false,
+  "objective": "Complete the Stage2 dual-class gradient, update, atomic-copy, and CUDA-resource checks that the authorized train095 probe could not reach, without changing the frozen scientific architecture, loss, formal folds, or cutoff procedure.",
+  "base_science_protocol": {
+    "workspace_relative_path": "EVC-work/protocols/h2_activity_suppress_selective_recovery_g2_science_v1.json",
+    "sha256": "ca61ec2777be57703c0c949d75e1457876ac419efc93df51a17efeb5a5229f23",
+    "status_remains_unchanged": true,
+    "formal_remains_blocked": true
+  },
+  "prior_probe_failure_chain": {
+    "decision": "failed_closed_before_stage2_training; formal blocked",
+    "source": "train_095.npz",
+    "reason": "Six real disagreement components were all marginal-negative, so the frozen both-class gate stopped Stage2 at zero optimizer steps.",
+    "runner_sha256": "fef4c50b716e5b10b9fd2cf0364e3cda56e7c5f2ca5925a8b105d08f9006b9fc",
+    "failure_receipt_sha256": "83e5d1a25d0ac4c1230efbf2d3082f8482566026b12e4613b6ed0b26dbdf7778",
+    "postmortem_sha256": "29ff992ba52b1409a6a899d5faa653cf6232d768274e80f9c6417b197a86e9ba",
+    "stage1_checkpoint_sha256": "ce5e223655abad5038073e9de165f726767793907c271d372e2faa550a80d9df",
+    "immutable_input_sha256": "ac28f29da532f3929b4408f6f7a48fc3805d038fe9d356a229413dbeb930f197",
+    "immutable_fit_labels_sha256": "51097bcd443bc9d3fee709b426538506b25b0d360a9140790f5128f1a8a02aa5",
+    "stage1_mechanics_already_proven": {
+      "optimizer_steps": 8,
+      "trainable_tensors": 14,
+      "trainable_parameters": 1712,
+      "all_tensors_updated": true,
+      "all_tensors_finite_nonzero_gradient": true,
+      "released_m20_89_tensors_bitwise_equal": true
+    }
+  },
+  "fixed_development_source": {
+    "name": "train_089.npz",
+    "event_count": 405722,
+    "polarity_minority_fraction": 0.4621662123325824,
+    "sha256": "e04a1284b803fe092b073757cf2171c09830ea385e2174a5398bb3b28f2c7ccb",
+    "selection_provenance": "Fixed before this resource probe from already-published old G1 source-level evidence: activity_control lost 31 TP events and 5 correct objects on train089. It is not selected after inspecting new component labels or scores.",
+    "role": "development mechanics only; never a held result",
+    "full_stream_bins": 160,
+    "only_source_array_permitted": true
+  },
+  "frozen_old_activity_checkpoint": {
+    "path": "experiments/20260811_high_density_dual_expert_grouped_oof_v1/paired_training/h2_hold_088_091__baseline/epoch_001_seed49.pt",
+    "sha256": "a73a037f09aadb478540aa40e50f9bbfbec73afb315b0fa54fca0b897b2a5b82",
+    "runtime_result_path": "experiments/20260811_high_density_dual_expert_grouped_oof_v1/paired_training/h2_hold_088_091__baseline/runtime_result.json",
+    "runtime_result_sha256": "cc4f3db6a57eebb62ae353d181aac84159b81920e60e182bac4f2f72ca970bda",
+    "historical_evaluation_sha256": "9417cc2569fa96e6a0a9dc4989fcb9e85225154b71516dccebe513f9c3b650fa",
+    "checkpoint_format_version": 2,
+    "checkpoint_epoch": 1,
+    "model_state_tensor_count": 103,
+    "model_parameter_count": 1926428,
+    "expert_state_tensor_count": 14,
+    "expert_parameter_count": 1712,
+    "input_mode": "activity_control",
+    "source_protocol_sha256": "a4f3ffaaf5a887fade2f47e08d32d5a716b31d2251bdbb0abcba9ae9b4d47d42",
+    "source_runner_sha256": "4c98e2e4b49bcd6e3b3dbe5e722a50360b51c639f60df982febd3ed4793555e2",
+    "source_final_model_state_sha256": "0c1ff3a537462d49d12cea8b116beffb85cb9e3b9e51d163237e61f8f6ac536c",
+    "fit_sources": [
+      "train_092.npz",
+      "train_093.npz",
+      "train_094.npz",
+      "train_095.npz",
+      "train_096.npz",
+      "train_097.npz",
+      "train_098.npz"
+    ],
+    "old_held_sources": [
+      "train_088.npz",
+      "train_089.npz",
+      "train_090.npz",
+      "train_091.npz"
+    ],
+    "why_permitted_here": "It supplies a real activity stream on the fixed development source without retraining Stage1 and train089 was held from this checkpoint's fit.",
+    "why_permanently_formal_forbidden": "Its fit sources include fresh outer-held G2 train092..094. It may never initialize, train, calibrate, rank, select a cutoff, generate a held feature, or contribute a score claim in the fresh-G2 formal experiment.",
+    "formal_weight_initialization_allowed": false,
+    "formal_feature_generation_allowed": false,
+    "formal_cutoff_or_score_evidence_allowed": false
+  },
+  "released_m20": {
+    "path": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+    "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "state_tensor_count": 89,
+    "must_remain_bitwise_equal": true
+  },
+  "frozen_inference_and_components": {
+    "prediction_threshold": 0.719,
+    "postprocess": "frozen effective C00",
+    "effective_c00_sha256": "5dd5fa3c3bfa6f510eebdee0cd098fde9932015fcb819eb9c1f54cd4794f6413",
+    "streams": "one released-M20 and one frozen-old-activity full-T160 pass on train089",
+    "disagreement": "complete M20+C00 atomic components that are not completely retained by activity+C00",
+    "marginal_label": "strictly positive iff restoring that one complete M20 component into activity raises exact official train089 Score; labels are fit-only mechanics",
+    "partial_component_recovery": false,
+    "outside_recovery_output": "bitwise activity+C00"
+  },
+  "stage2_resource_training": {
+    "architecture": "model/h2_activity_selective_recovery.py::DisagreementRecoveryNet",
+    "architecture_parameter_count": 7910,
+    "input_patch_channels": 57,
+    "architecture_or_feature_change_from_science_v1": false,
+    "seed": 73,
+    "optimizer_steps": 8,
+    "component_batch_size": 16,
+    "batch_schedule": "deterministic class-cycling batches drawn only from real train089 disagreement components; every step contains both observed marginal classes and repeats are allowed only to fill the fixed resource batch",
+    "loss": "class-balanced binary cross entropy identical in form to science v1",
+    "optimizer": "AdamW",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "gradient_clip_norm": 5.0,
+    "required_real_class_count": 2,
+    "fabricated_labels_or_synthetic_components_allowed": false,
+    "formal_checkpoint_reuse_allowed": false,
+    "cutoff_selection_or_metric_claim_allowed": false
+  },
+  "mechanical_atomic_action": {
+    "purpose": "Exercise only complete-component recovery and bitwise-copy assertions after Stage2 updates.",
+    "cutoff": "maximum observed fit-only conformal confidence",
+    "scientific_or_formal_cutoff": false,
+    "must_recover_at_least_one_complete_component": true,
+    "must_copy_selected_m20_scores_bitwise": true,
+    "must_copy_activity_scores_outside_selected_components_bitwise": true,
+    "official_candidate_metric_must_not_be_reported": true
+  },
+  "scope_firewall": {
+    "source_arrays_allowed": ["train_089.npz"],
+    "held_g2_train_092_094_allowed": false,
+    "other_g1_or_g3_arrays_allowed": false,
+    "validation_or_test_allowed": false,
+    "formal_training_or_evaluation_allowed": false,
+    "source_name_path_hash_label_or_target_as_inference_feature": false
+  },
+  "resource_budget": {
+    "stage1_optimizer_steps": 0,
+    "stage2_optimizer_steps": 8,
+    "full_stream_passes": 2,
+    "estimated_elapsed_minutes": [2, 5],
+    "estimated_peak_cuda_mib": [3000, 3600],
+    "hard_peak_cuda_mib": 3600,
+    "estimated_artifact_mib": [10, 90],
+    "persist_peak_on_success_or_failure": true
+  },
+  "immutable_artifacts": {
+    "output_directory": "experiments/20260811_h2_activity_suppress_selective_recovery_g2_v1/resource_probe_v2_train089",
+    "overwrite_allowed": false,
+    "input_feature_artifact_contains_labels": false,
+    "fit_label_artifact_separate": true,
+    "stage2_checkpoint_marked_resource_only": true,
+    "raw_post_embedding_action_hashes_required": true,
+    "success_or_failure_receipt_required": true
+  },
+  "execution": {
+    "runner": "EVC-work/run_h2_activity_selective_recovery_resource_probe_v2.py",
+    "helper_runner": "EVC-work/run_h2_activity_selective_recovery_probe.py",
+    "helper_runner_sha256": "fef4c50b716e5b10b9fd2cf0364e3cda56e7c5f2ca5925a8b105d08f9006b9fc",
+    "gpu_authorized": false,
+    "authorization_policy": "A new explicit parent authorization is required after CPU tests and hashes are reported. Do not overlap any pyramid GPU process.",
+    "exclusive_gpu_preflight_and_postflight": true
+  },
+  "pass_gates": [
+    "old checkpoint and runtime provenance hashes match",
+    "only train089 source array is opened and exact H2 input-only route holds",
+    "real disagreement set contains both strict marginal classes or fail closed",
+    "all 7910 Stage2 parameters receive finite nonzero gradient and update",
+    "every Stage2 branch has finite nonzero gradient on every step",
+    "released M20 and inherited old-checkpoint M20 tensors remain bitwise equal",
+    "mechanical recovery is complete-component atomic and bitwise",
+    "peak reserved CUDA memory is at most 3600 MiB",
+    "held G2, all other train sources, validation, and test arrays remain unread",
+    "formal remains stopped after this resource probe"
+  ],
+  "fail_closed": true
+}

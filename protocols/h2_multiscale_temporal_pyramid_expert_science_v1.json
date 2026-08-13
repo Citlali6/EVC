@@ -1,0 +1,175 @@
+{
+  "schema": "ev-uav-frozen-m20-h2-multiscale-temporal-pyramid-expert-science-v1",
+  "created_local": "2026-08-11T13:48:00+08:00",
+  "status": "frozen_before_any_multiscale_pyramid_GPU_or_held_prediction",
+  "experiment_id": "h2_multiscale_temporal_pyramid_expert_v1",
+  "objective": "Use spatially aligned 16/32/64/full-160 temporal summaries to suppress H2 hard-negative components without reducing target-event or target-time-group recall.",
+  "prior_evidence_disclosure": {
+    "V1_G1_residual_metrics_seen": true,
+    "V2_G2_residual_metrics_seen": true,
+    "CPU_track_graph_all_three_groups_metrics_seen": true,
+    "use": "mechanism_only_long_context_needed_not_parameter_or_threshold_selection",
+    "architecture_difference": "The pyramid uses complete-stream low-resolution moments and a shared-scale mixture; it is not the prior local three-bin residual or dual magnitude branch."
+  },
+  "science_scope": {
+    "dataset": "train_088_to_098_only",
+    "validation_read_allowed": false,
+    "test_read_allowed": false,
+    "submission_allowed": false,
+    "released_M20_pretraining_exposure_disclosure": "Source-group OOF evaluates only the new pyramid expert because released M20 saw all train sources.",
+    "source_name_path_hash_fold_index_label_or_target_id_inference_feature_allowed": false,
+    "labels_and_target_ids_use": "fit_loss_and_final_held_metrics_only"
+  },
+  "released_m20": {
+    "checkpoint": "EVC-work/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt",
+    "sha256": "4b8b2b19ea9d913ee4e52cb21ae52bf945b2b0f3cefd5cb5ab6f64d51bf49849",
+    "metadata": {
+      "temporal_bin_size": 50,
+      "context_bins": 5,
+      "width": 16,
+      "sequence_length": 16,
+      "log_count_clip": 4.0,
+      "density_calibration_enabled": true,
+      "confidence_head_enabled": false,
+      "temporal_attention_enabled": true
+    },
+    "feature_API": {
+      "first_pass": "encode_bottleneck_then_temporal_residual_over_complete_T160",
+      "streaming_decode": "_encode_then_base.decoder2_decoder1_decoder0_then_density_calibrator_and_base.head",
+      "exposed_detached_features": ["decoder0_16ch", "base_logit_1ch", "centre_negative", "centre_positive", "centre_activity"],
+      "M20_training_mode": false,
+      "M20_requires_grad": false
+    }
+  },
+  "input_only_route": {
+    "rule": "complete_event_count_greater_than_200000_AND_complete_input_polarity_minority_fraction_at_least_0.20",
+    "provenance": "pre-existing train-only H1/H2 separation with a wide input-observable gap",
+    "non_H2": "released_M20_bitwise_identity",
+    "source_identity_used": false
+  },
+  "source_groups": {
+    "g1_088_091": ["train_088.npz", "train_089.npz", "train_090.npz", "train_091.npz"],
+    "g2_092_094": ["train_092.npz", "train_093.npz", "train_094.npz"],
+    "g3_095_098": ["train_095.npz", "train_096.npz", "train_097.npz", "train_098.npz"]
+  },
+  "fold_order": [
+    {
+      "fold_id": "hold_g3_first",
+      "fit_groups": ["g1_088_091", "g2_092_094"],
+      "held_group": "g3_095_098",
+      "stop_if_not_promoted": true,
+      "reason": "G3 has not been a formal held fold for the earlier neural residual experts."
+    },
+    {
+      "fold_id": "hold_g1_second",
+      "fit_groups": ["g2_092_094", "g3_095_098"],
+      "held_group": "g1_088_091",
+      "run_only_after_first_fold_passes": true
+    },
+    {
+      "fold_id": "hold_g2_third",
+      "fit_groups": ["g1_088_091", "g3_095_098"],
+      "held_group": "g2_092_094",
+      "run_only_after_first_two_folds_pass": true
+    }
+  ],
+  "architecture": {
+    "module": "model/h2_multiscale_temporal_pyramid_expert.py",
+    "decoder_channels": 16,
+    "observation_channels": 20,
+    "spatial_downsample": 8,
+    "temporal_scales_bins": [16, 32, 64, 160],
+    "summary_per_scale": ["edge_count_normalized_mean", "standard_deviation"],
+    "scale_encoder": "one_shared_depthwise_spatial_encoder_plus_learned_scale_tokens",
+    "scale_mixture": "input-conditioned_softmax_at_low_spatial_resolution",
+    "dense_fusion": "context_FiLM_of_local_decoder_query",
+    "output": "one_signed_dense_logit_correction",
+    "output_projection_initialization": "exact_zero_weight_and_bias",
+    "identity_at_initialization": "bitwise_released_M20_logits",
+    "trainable_parameter_count": 3381,
+    "candidate_count": 1,
+    "architecture_scale_or_model_grid_allowed": false
+  },
+  "streaming_execution": {
+    "pass_1": "released_M20_complete-stream bottleneck and temporal residual",
+    "pass_2": "chunked frozen decode and immediate spatial pooling to 20-channel observations",
+    "between_passes": "fixed 16/32/64/full-stream moments; only low-resolution tensors persist",
+    "pass_3": "chunked frozen decode plus pyramid expert dense correction",
+    "full_high_resolution_T160_feature_cache": false
+  },
+  "training": {
+    "seed": 67,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "mixed_precision": true,
+    "gradient_clip_norm": 5.0,
+    "epochs": 2,
+    "views_per_fit_source_per_epoch": 4,
+    "view_bins": 16,
+    "first_fold_optimizer_steps": 56,
+    "view_sampling": "equal alternation of fit-only target-bearing and base-C00 pure-FP-component windows",
+    "checkpoint_selection": "final_epoch_only",
+    "early_stopping_allowed": false,
+    "hyperparameter_or_loss_weight_grid_allowed": false,
+    "loss": {
+      "event_classification": "positive_negative_equal_mass_BCE_with_base-confidence_hard-negative_weighting_divided_by_detached_base_loss",
+      "target_time_group_recall_constraint": "mean_relu_of_base_group_max_minus_candidate_group_max_divided_by_fit-batch_self_scale",
+      "hard_negative_component_suppression_constraint": "one_fit-batch_self-scale_drop_of_each_train-only_pure-FP_base-C00_component_maximum",
+      "dynamic_multipliers": "unit-step_projected_dual_ascent_after_each_optimizer_step",
+      "augmented_curvature": "unit_quadratic_for_each_normalized_constraint",
+      "fixed_loss_weights": false,
+      "prediction_threshold_used_for_event_classification": false,
+      "held_statistics_used": false
+    },
+    "all_optimizer_step_diagnostics_required": true
+  },
+  "eight_step_probe": {
+    "GPU_authorized": false,
+    "source": "train_092.npz",
+    "source_is_first_fold_fit_member": true,
+    "held_G3_array_read_allowed": false,
+    "optimizer_steps": 8,
+    "required_checks": [
+      "initial_candidate_logits_bitwise_equal_base",
+      "released_M20_state_bitwise_unchanged",
+      "finite_loss_gradients_and_parameters_each_step",
+      "zero_output_projection_updates_on_step_one",
+      "shared_scale_encoder_and_mixture_receive_nonzero_gradient_by_step_eight",
+      "all_step_dynamic_constraint_diagnostics_persisted",
+      "peak_CUDA_memory_below_3.5_GiB"
+    ]
+  },
+  "evaluation": {
+    "complete_stream": "T160",
+    "prediction_threshold": 0.719,
+    "postprocess": "same_effective_C00_for_baseline_and_candidate",
+    "held_open_timing": "only_after_final_epoch_checkpoint_and_dual_state_are_written",
+    "paired_metrics": ["Score", "IoU", "Pd", "Fa", "TP", "FP", "FN", "CO", "FC"]
+  },
+  "promotion_gates": {
+    "first_fold_score_gain_minimum": 0.01,
+    "each_fold_and_pooled_score_not_lower": true,
+    "each_fold_and_pooled_iou_not_lower": true,
+    "each_fold_and_pooled_pd_not_lower": true,
+    "each_fold_and_pooled_true_positive_events_not_lower": true,
+    "each_fold_and_pooled_correct_objects_not_lower": true,
+    "each_fold_and_pooled_fa_not_higher": true,
+    "each_fold_and_pooled_false_positive_events_not_higher": true,
+    "each_fold_and_pooled_false_components_not_higher": true
+  },
+  "GPU_budget_before_measurement": {
+    "expert_parameter_storage_fp32_MiB": 0.013,
+    "low_resolution_T160_observations_fp32_MiB": 17.8,
+    "four_scale_moments_fp16_CPU_cache_MiB": 70.9,
+    "estimated_expert_training_increment_MiB": 250,
+    "conservative_total_peak_CUDA_GiB": 3.5,
+    "basis": "tensor_shape_arithmetic_plus_existing_released_M20_probe_receipts_not_a_new_GPU_measurement"
+  },
+  "output_contract": {
+    "workspace_relative_directory": "experiments/20260811_h2_multiscale_temporal_pyramid_expert_v1",
+    "no_clobber": true,
+    "default_core_or_submission_change_allowed": false,
+    "validation_or_test_read": false
+  }
+}

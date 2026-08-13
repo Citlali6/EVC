@@ -1,0 +1,40 @@
+{
+ "checkpoint": "log\\high_oof_h2\\runs\\20260813-021338_seed49_pid39056\\epoch_010_seed49.pt",
+ "sources": [
+  "train_044.npz",
+  "train_045.npz",
+  "train_046.npz",
+  "train_047.npz"
+ ],
+ "threshold": 0.719,
+ "baseline_counts": {
+  "true_positive_events": 13890,
+  "false_positive_events": 2897,
+  "false_negative_events": 118,
+  "correct_target_frames": 1117,
+  "target_frames": 1123,
+  "false_components": 1757,
+  "frame_count": 636,
+  "event_count": 1101786
+ },
+ "candidate_counts": {
+  "true_positive_events": 13899,
+  "false_positive_events": 2969,
+  "false_negative_events": 109,
+  "correct_target_frames": 1118,
+  "target_frames": 1123,
+  "false_components": 1818,
+  "frame_count": 636,
+  "event_count": 1101786
+ },
+ "count_delta": {
+  "true_positive_events": 9,
+  "false_positive_events": 72,
+  "false_negative_events": -9,
+  "correct_target_frames": 1,
+  "target_frames": 0,
+  "false_components": 61,
+  "frame_count": 0,
+  "event_count": 0
+ }
+}

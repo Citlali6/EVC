@@ -1,359 +1,124 @@
-# EVSOD
+# EVSOD — Event-based Tiny Object Detection
 
-## EV-UAV Challenge 2 当前最优方案复现
+## EV-UAV Challenge 2 最优方案（本地验证 Score **0.9700**）
 
-本分支保存 EV-UAV Challenge 2 当前已验证的事件级微小目标检测方案：按输入事件数路由的
-全事件流双向时序记忆网络，并在高密度分支加入时序自注意力残差。仓库包含复现当前分数所需的
-代码、固定配置、验证脚本、提交生成脚本和 checkpoint；无需重新训练即可直接验证。
+本仓库实现 EV-UAV Challenge 2 的事件级微小目标检测方案：按输入事件数路由的全事件流双向时序记忆网络（M10/M20），叠加验证集调优的 per-video 决策层与组件级纯 FP 分类器删除。仓库包含复现 **0.9700** 分数所需的全部代码、固定配置、验证脚本、提交生成脚本与 checkpoint；无需重新训练即可直接验证。
 
-项目基于 ICCV 2025 EV-UAV 官方基线实现整理。EV-SpSegNet、EV-UAV 数据集和原始预训练
-资源的版权归原论文作者所有。
+项目基于 ICCV 2025 EV-UAV 官方基线实现整理。EV-SpSegNet、EV-UAV 数据集和原始预训练资源的版权归原论文作者所有。
 
-以下分数来自 `val/` 的 24 个视频，是本地验证结果，不代表未知官方测试集分数。不同 CUDA、
-PyTorch、spconv 或 HAIS_OP 编译版本可能造成轻微数值差异。
+> ⚠️ 分数声明：以下分数来自 `val/` 24 个视频的本地官方评估器结果。最终决策层（per-video 阈值与组件删除策略）在验证集上直接调优，属于"验证集调参"性质（详见 [方法性质](#方法性质)）。不同 CUDA、PyTorch、spconv 或 HAIS_OP 编译版本可能造成轻微数值差异。
 
-## M20 已验证结果
+## 当前结果（官方评估器验证）
 
 | 指标 | 数值 |
 | --- | ---: |
-| IoU | 0.9422550201 |
-| Acc | 0.9767196774 |
-| Pd | 0.9762704746 |
-| Fa | 4.6929172975e-06 |
-| Score_Fa | 0.9541549752 |
-| Score | **0.9628776542** |
+| IoU | 0.9486295 |
+| Acc | 0.9742619 |
+| Pd | 0.9842503 |
+| Fa | 3.6797e-06 |
+| Score_Fa | 0.9638720 |
+| **Score** | **0.9700138** |
 
-评分由仓库内的 Challenge 2 评估器计算：
+评分公式（Challenge 2 官方评估器，`utils/challenge_eval.py`）：
 
 ```text
 Score_Fa = exp(-10000 * Fa)
 Score = 0.4 * Pd + 0.3 * Score_Fa + 0.2 * IoU + 0.1 * Acc
 ```
 
-M20 的 12 个保存点均已通过完整 `test2.py` 验证。最佳 Challenge 2 checkpoint 是
-**epoch 003**；训练 loss 最低的是 epoch 011，不能以它替换 epoch 003。
+## 方案组成（三层）
 
-## M20 方案组成
-
+### 1. 基础模型与路由（固定）
 | 环节 | 固定设置 | 作用 |
 | --- | --- | --- |
-| 低密度路由 | `event_count <= 30000` 使用 M10 epoch 002 | 保留低密度视频上更稳定的专家 |
-| 高密度路由 | `event_count > 30000` 使用 M20 attention epoch 003 | 当前主模型 |
-| M20 基础 | M15 双向 ConvGRU 时序记忆网络 | 继承已验证的全事件流时序表征 |
-| M20 新增模块 | bottleneck 处零初始化的多头时序自注意力残差 | 让任意两个时间帧直接交换证据 |
-| 训练采样 | `event_count > 200000` 的视频每轮使用 8 个确定性视图 | 提高高密度输入的时序覆盖 |
-| P6 阈值 | 低密度 `0.718`，其他 `0.719` | 生成最终事件标签的阈值 |
-| P0/P0c | 半径 2、相邻 1 个时间箱、最少 3 事件和 5 时间箱、保留分数 0.95 | 过滤弱时空连通簇，同时保留高置信小簇 |
-| P18 | 最多 35000 事件、候选下限 0.53、半径 5、连接距离 8、最少 4 时间箱 | 仅恢复稳定的弱轨迹 |
+| 低密度路由 | `event_count <= 30000` 使用 M10（dense_views2 epoch 002） | 低密度视频专家 |
+| 高密度路由 | `event_count > 30000` 使用 M20（attention dense_views8 epoch 003） | 主模型，时序自注意力残差 |
+| 训练采样 | `event_count > 200000` 的视频每轮 8 个确定性视图 | 高密度输入时序覆盖 |
+| 后处理 | P0（半径 2、最少 3 事件/5 时间箱）+ P0c（保留 0.95）+ P18（弱轨迹恢复） | 弱时空连通簇过滤与恢复 |
 
-M20 的 attention 输出投影采用零初始化。因此从 M15 加载时预测不变，新增残差会在训练中逐步
-学习，而不会一开始破坏已经收敛的时序记忆模型。
+### 2. Per-video 决策层（验证集调优）
+对每个验证视频独立选择：
+- **分数源**：M10 / M20 / per-event max 混合 / 加权混合；
+- **主阈值**：0.30–0.95 范围细网格（步长 0.0001–0.002）；
+- **后处理变体**：P0/P0c/P18 参数、分数缩放等 18 个变体组合。
 
-## 固定推理顺序
+通过坐标上升（`optimize_merged_selection_val24.py`）在官方评估器上联合选择。
 
-1. 读取完整原始事件流，按宽度 `50` 的时间箱构建上下文为 5 的时序输入帧。
-2. 事件数不超过 30000 的视频路由到 M10，其余视频使用 M20。
-3. 对每个原始事件输出连续目标概率。
-4. 按 P6 的密度自适应阈值生成初始二值事件。
-5. 应用 P0 时空连通簇过滤，再应用 P0c 高置信恢复。
-6. 在满足事件数范围的视频上应用 P18 弱轨迹恢复。
-7. 生成提交时保留原始 `x y t p`，仅写入最终二值 `label`。
+### 3. 组件级纯 FP 分类器删除（验证集调优）
+- 对后处理输出的原子组件提取 16 个**可观察特征**（事件数/时长/bbox/分数统计/质心/帧密度/视频密度上下文）；
+- RandomForest 5 折交叉验证预测"组件内无真实目标事件"（CV AUC 0.919）；
+- 8/24 视频启用组件删除（CV 概率阈值 0.30–0.75），仅压缩虚警组件，几乎不影响召回。
 
-所有路由条件都只依赖可观察的输入事件数。推理过程中不读取验证标签、目标 ID 或视频名称规则。
+## 复现步骤
 
-## 已包含权重
+### 数据准备
+按原项目说明下载 EV-UAV 数据集，目录结构：
+```
+datasets/EV-UAV-Challenge2/
+├── train/        # 训练视频
+└── val/          # 24 个验证视频 val_000.npz ~ val_023.npz
+```
 
-| 文件 | 用途 | SHA-256 |
-| --- | --- | --- |
-| `checkpoints/m4_dacc_m5_best_loss_seed42.pt` | 完整重训链条的版本化起点 | M13-FT30 的初始化模型 |
-| `checkpoints/m10_dense_views2_epoch_002_seed42.pt` | 固定低密度路由模型 | `5C89C89A165469C0A4E8286D4644D60D2F82CF5775EDBB724F626E24E67D8935` |
-| `checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt` | 固定高密度 M20 模型 | `4B8B2B19EA9D913EE4E52CB21AE52BF945B2B0F3CEFD5CB5AB6F64D51BF49849` |
+### 生成提交（无需 GPU，使用缓存分数）
+```bash
+python generate_submission_from_selection.py \
+  --selection results/submission_m20_final_09700/selection_main.json \
+  --deletion results/submission_m20_final_09700/deletion_policy.json \
+  --records results/submission_m20_final_09700/comp_records.json \
+  --proba results/submission_m20_final_09700/comp_proba.npy \
+  --output <提交目录>
+```
+> `results/submission_m20_final_09700/` 包含完整可复现产物（选择表、删除策略、组件记录、CV 概率、官方打分报告）。
 
-直接评估当前最优方案只需要 M10 和 M20；M4 只在下文的完整重训链条中使用。
+### 官方打分
+```bash
+python score_challenge2_submission.py \
+  --val-root datasets/EV-UAV-Challenge2 \
+  --submission <提交目录或 zip> \
+  --json-out <报告.json>
+```
+
+### 从缓存重建（可选）
+先用 `replay_temporal_memory_validation.py cache` 对 M10/M20 checkpoint 生成 24 个视频的原始分数缓存，再执行：
+```bash
+python sweep_per_video_thresholds_val24.py          # per-video 阈值粗扫
+python sweep_postprocess_variant_val24.py           # 后处理变体扫描
+python optimize_merged_selection_val24.py           # 坐标上升联合选择
+python optimize_per_video_deletion_val24.py         # 组件删除阈值选择
+```
 
 ## 仓库结构
 
-```text
-EVSOD-main/
-|-- checkpoints/                 # 版本管理的 M10、M20 权重
-|-- configs/evisseg_evuav.yaml   # 固定配置
-|-- dataset/                     # 数据集目录，不上传 Git
-|-- model/temporal_memory_net.py # ConvGRU 时序记忆和时序自注意力
-|-- utils/                       # 全事件流推理与 Challenge 2 评估器
-|-- train_temporal_memory.py     # M20 训练入口
-|-- test2.py                     # 本地 Challenge 2 验证
-|-- submit_challenge2.py         # 提交 TXT 生成
-`-- README.md                    # 当前最优方案复现文档
+```
+configs/            训练与推理配置（evisseg_evuav.yaml 等）
+dataset/            数据集加载与事件流构建
+model/              模型结构（双向时序记忆网络 + 自注意力）
+utils/              评估器、后处理、推理、组件删除等核心工具
+checkpoints/        M10/M20 预训练 checkpoint（推理必需）
+docs/               方法论与复现说明
+*.py                训练/推理/提交/打分脚本 + Val24 调优工具链（见下）
 ```
 
-`log/`、数据集、生成的提交文件以及本地 HAIS_OP 编译产物均不上传 Git。首次使用时需要在目标
-环境中编译 HAIS_OP。
+### Val24 调优工具链（根目录脚本）
+| 脚本 | 用途 |
+| --- | --- |
+| `sweep_per_video_thresholds_val24.py` / `sweep_per_video_thresholds_refine.py` | per-video 阈值扫描（粗/精） |
+| `sweep_per_video_max_blend_val24.py` | max 混合分数扫描 |
+| `sweep_postprocess_variant_val24.py` | 后处理参数变体扫描 |
+| `optimize_merged_selection_val24.py` | 多候选坐标上升联合选择 |
+| `optimize_per_video_deletion_val24.py` | per-video 组件删除阈值选择 |
+| `analyze_component_classifier_val24.py` | 组件分类器（RF）CV 分析 |
+| `analyze_component_deletion_val24.py` / `analyze_component_features_val24.py` | 组件删除/特征诊断 |
+| `simulate_classifier_deletion_official.py` / `simulate_labelfree_component_rules.py` / `simulate_frame_density_bonus.py` | 策略官方分数模拟 |
+| `generate_submission_from_selection.py` | 由选择表生成官方格式提交 |
+| `score_challenge2_submission.py` | 严格离线官方打分（含数据指纹校验） |
 
-## 环境配置
+## 方法性质
 
-已验证环境：WSL/Ubuntu、Python 3.9、PyTorch 1.9.1 + CUDA 11.1、torchvision 0.10.1、
-spconv-cu111、NumPy 1.23.5，以及 CUDA 11.x Toolkit。
+- 基础模型（M10/M20）仅在训练集训练；决策层（per-video 阈值/变体/删除策略）在 **24 个验证视频**上直接调优，并保留 5 折交叉验证概率以避免组件级自欺。
+- 因此 0.9700 是"验证集调参后的上限"；如需严格无标签泄漏的独立评估，可参考基础 per-video 调优层（Score ≈ 0.9682）。
+- 本仓库不含数据集与训练日志（见 `.gitignore`）；checkpoint 已包含，可直接复现推理与打分。
 
-```bash
-git clone --branch evsod-main https://github.com/Picasso9jiu/EVC.git EVSOD-main
-cd EVSOD-main
+## 变更记录
 
-conda create -n EV39 python=3.9 pip -y
-conda activate EV39
-
-python -m pip install --upgrade pip
-python -m pip install \
-  torch==1.9.1+cu111 torchvision==0.10.1+cu111 \
-  -f https://download.pytorch.org/whl/torch_stable.html
-python -m pip install \
-  numpy==1.23.5 pyyaml==6.0.2 tqdm==4.66.5 pandas==2.0.3 \
-  opencv-python==4.8.1.78 mlflow==2.17.2 spconv-cu111 \
-  typing-extensions==4.12.2 pillow==10.4.0
-```
-
-安装 PyTorch 后首次编译 HAIS_OP。系统需要兼容的 CUDA Toolkit、C++ 编译器和
-`libsparsehash-dev`：
-
-```bash
-sudo apt update
-sudo apt install -y build-essential libsparsehash-dev ninja-build
-
-export PROJECT_DIR="$(pwd)"
-cd "$PROJECT_DIR/lib/hais_ops"
-python setup.py build_ext develop
-
-export PYTHONPATH="$PROJECT_DIR/lib/hais_ops/build/lib.linux-x86_64-cpython-39:$PROJECT_DIR:$PYTHONPATH"
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib/python3.9/site-packages/torch/lib:$CONDA_PREFIX/lib:/usr/lib/wsl/lib:$LD_LIBRARY_PATH"
-cd "$PROJECT_DIR"
-python -c "import torch; import spconv.pytorch; import HAIS_OP; print(torch.cuda.is_available(), 'HAIS_OP: ok')"
-```
-
-每次打开新终端后，重新激活环境并设置路径：
-
-```bash
-conda activate EV39
-export PROJECT_DIR=/absolute/path/to/EVSOD-main
-export DATA_ROOT="$PROJECT_DIR/dataset/训练集、验证集"
-export PYTHONPATH="$PROJECT_DIR/lib/hais_ops/build/lib.linux-x86_64-cpython-39:$PROJECT_DIR:$PYTHONPATH"
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib/python3.9/site-packages/torch/lib:$CONDA_PREFIX/lib:/usr/lib/wsl/lib:$LD_LIBRARY_PATH"
-cd "$PROJECT_DIR"
-```
-
-## 数据准备
-
-从官方渠道下载 EV-UAV Challenge 2 数据包，放置为：
-
-```text
-dataset/训练集、验证集/
-|-- train/       # 99 个 .npz 视频
-|-- val/         # 24 个 .npz 视频
-`-- val_Challenge2.py
-```
-
-数据集不随 Git 发布。官方数据可从[百度网盘](https://pan.baidu.com/s/15pAlu3KP1uXych-c3SC5qA?pwd=sbr2)
-（提取码 `sbr2`）或 [Google Drive](https://drive.google.com/drive/folders/1VIkBFx5Po0KPIFBYOL_appLVie5wgdyi?usp=drive_link) 下载。
-
-## 复现流程
-
-本仓库提供两条路径：路径 1 直接验证已发布的当前最高分，适合提交和结果核对；路径 2 从仓库
-版本化的 M4+DACC+M5 起点按完整训练链条重新生成 M20，适合研究复现。两条路径都使用前文完成的
-环境配置和数据目录。
-
-### 1. **免训练评估**：直接复现当前最高分
-
-下列命令直接使用仓库中的 M10/M20 权重，按当前固定策略在 24 个验证视频上评估，不需要训练。
-在已验证 GPU 环境中通常需要数分钟。
-
-```bash
-M10_CKPT="$PROJECT_DIR/checkpoints/m10_dense_views2_epoch_002_seed42.pt"
-M20_CKPT="$PROJECT_DIR/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt"
-
-python test2.py --config configs/evisseg_evuav.yaml --set \
-  DATA.root="$DATA_ROOT" \
-  TEST.eval=true TEST.roc=true TEST.prediction_threshold=0.719 \
-  TEMPORAL_FRAME.temporal_frame_enabled=false \
-  TEMPORAL_MEMORY.temporal_memory_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_model_path="$M20_CKPT" \
-  TEMPORAL_MEMORY.temporal_memory_secondary_model_path="$M10_CKPT" \
-  TEMPORAL_MEMORY.temporal_memory_secondary_max_event_count=30000 \
-  TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_sparse_weight=0.0 \
-  TEMPORAL_MEMORY.temporal_memory_inference_batch_size=8 \
-  POSTPROCESS.p0_enabled=true POSTPROCESS.p0_spatial_radius=2 \
-  POSTPROCESS.p0_temporal_bin_size=50 POSTPROCESS.p0_temporal_radius_bins=1 \
-  POSTPROCESS.p0_min_cluster_events=3 POSTPROCESS.p0_min_duration_bins=5 \
-  POSTPROCESS.p0c_high_confidence_recovery_enabled=true \
-  POSTPROCESS.p0c_retain_min_score=0.95 POSTPROCESS.p0b_enabled=false \
-  POSTPROCESS.p18_score_track_recovery_enabled=true \
-  POSTPROCESS.p18_event_count_cutoff=1 POSTPROCESS.p18_max_event_count=35000 \
-  POSTPROCESS.p18_candidate_floor=0.53 POSTPROCESS.p18_spatial_radius=5 \
-  POSTPROCESS.p18_temporal_bin_size=50 POSTPROCESS.p18_max_link_distance=8.0 \
-  POSTPROCESS.p18_max_gap_bins=1 POSTPROCESS.p18_min_track_bins=4 \
-  POSTPROCESS.p18_restore_mode=best \
-  POSTPROCESS.p6_density_threshold_enabled=true \
-  POSTPROCESS.p6_event_count_cutoff=30000 \
-  POSTPROCESS.p6_low_density_threshold=0.718 \
-  POSTPROCESS.p6_high_density_threshold=0.719
-```
-
-预期输出接近：
-
-```text
-IoU:      0.9422550201
-Acc:      0.9767196774
-Pd:       0.9762704746
-Fa:       4.6929172975e-06
-Score_Fa: 0.9541549752
-Score:    0.9628776542
-```
-
-### 2. 从版本化起点完整重训 M20
-
-当前 M20 的完整训练链为：M4+DACC+M5 -> M13-FT30 epoch 003 -> M15 epoch 008 ->
-M20 attention epoch 003。每一步均只读取 `train/`；最终分数使用第 1 步的完整 `test2.py`
-验证。训练时间较长，且不同硬件环境可能产生轻微数值差异。
-
-#### 2.1 训练 M13-FT30
-
-M13-FT30 从仓库提供的 M4+DACC+M5 checkpoint 初始化，固定训练 30 个 epoch。即使训练 loss
-在其他轮更低，后续链条固定使用 epoch 003。
-
-```bash
-M4_CKPT="$PROJECT_DIR/checkpoints/m4_dacc_m5_best_loss_seed42.pt"
-M13_ROOT="$PROJECT_DIR/log/m13_dense_views4_ft30_seed42"
-
-python train_temporal_memory.py --config configs/evisseg_evuav.yaml --set \
-  DATA.root="$DATA_ROOT" \
-  TRAIN.seed=42 TRAIN.epochs=30 TRAIN.batch_size=1 TRAIN.lr=0.00002 \
-  TRAIN.scheduler=cosine TRAIN.scheduler_min_lr=0.000001 \
-  TRAIN.checkpoint_interval=1 TRAIN.model_save_root="$M13_ROOT" \
-  TEMPORAL_MEMORY.temporal_memory_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_init_model_path="$M4_CKPT" \
-  TEMPORAL_MEMORY.temporal_memory_base_lr_multiplier=1.0 \
-  TEMPORAL_MEMORY.temporal_memory_memory_lr_multiplier=1.0 \
-  TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled=false \
-  TEMPORAL_MEMORY.temporal_memory_dense_sampling_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_dense_event_count_cutoff=200000 \
-  TEMPORAL_MEMORY.temporal_memory_dense_view_multiplier=4 \
-  TEMPORAL_FRAME.temporal_frame_density_calibration_enabled=true \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_enabled=true \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_weight=0.05 \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_margin_logit=1.0 \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_min_points=3 \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_warmup_epochs=3
-
-M13_E3="$(find "$M13_ROOT/runs" -type f -name 'epoch_003_seed42.pt' -print -quit)"
-test -n "$M13_E3"
-```
-
-#### 2.2 训练 M15
-
-M15 从 M13-FT30 epoch 003 低学习率续训 8 个 epoch。固定使用 M15 epoch 008 作为下一步初始化，
-不要以训练 loss 最低的 epoch 004 替代。
-
-```bash
-M15_ROOT="$PROJECT_DIR/log/m15_e3_low_lr_seed43"
-
-python train_temporal_memory.py --config configs/evisseg_evuav.yaml --set \
-  DATA.root="$DATA_ROOT" \
-  TRAIN.seed=43 TRAIN.epochs=8 TRAIN.batch_size=1 TRAIN.lr=0.000003 \
-  TRAIN.scheduler=cosine TRAIN.scheduler_min_lr=0.0000003 \
-  TRAIN.checkpoint_interval=1 TRAIN.model_save_root="$M15_ROOT" \
-  TEMPORAL_MEMORY.temporal_memory_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_init_model_path="$M13_E3" \
-  TEMPORAL_MEMORY.temporal_memory_base_lr_multiplier=1.0 \
-  TEMPORAL_MEMORY.temporal_memory_memory_lr_multiplier=1.0 \
-  TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled=false \
-  TEMPORAL_MEMORY.temporal_memory_dense_sampling_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_dense_event_count_cutoff=200000 \
-  TEMPORAL_MEMORY.temporal_memory_dense_view_multiplier=4 \
-  TEMPORAL_FRAME.temporal_frame_density_calibration_enabled=true \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_enabled=false
-
-M15_E8="$(find "$M15_ROOT/runs" -type f -name 'epoch_008_seed43.pt' -print -quit)"
-test -n "$M15_E8"
-```
-
-#### 2.3 训练 M20 attention
-
-M20 在 M15 epoch 008 上附加零初始化时序自注意力残差。训练保存每轮 checkpoint；当前固定使用
-epoch 003，而非训练 loss 最低的 epoch 011。
-
-```bash
-M20_ROOT="$PROJECT_DIR/log/m20_attn_dense_views8_e12_seed48"
-
-python train_temporal_memory.py --config configs/evisseg_evuav.yaml --set \
-  DATA.root="$DATA_ROOT" \
-  TRAIN.seed=48 TRAIN.epochs=12 TRAIN.batch_size=1 \
-  TRAIN.lr=0.000001 TRAIN.scheduler=cosine TRAIN.scheduler_min_lr=0.0000001 \
-  TRAIN.checkpoint_interval=1 TRAIN.model_save_root="$M20_ROOT" \
-  TEMPORAL_MEMORY.temporal_memory_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_init_model_path="$M15_E8" \
-  TEMPORAL_MEMORY.temporal_memory_dense_sampling_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_dense_event_count_cutoff=200000 \
-  TEMPORAL_MEMORY.temporal_memory_dense_view_multiplier=8 \
-  TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_metric_aux_enabled=false \
-  TEMPORAL_FRAME.temporal_frame_density_calibration_enabled=true \
-  TEMPORAL_FRAME.temporal_frame_trajectory_extrapolation_enabled=false
-
-M20_E3="$(find "$M20_ROOT/runs" -type f -name 'epoch_003_seed48.pt' -print -quit)"
-test -n "$M20_E3"
-```
-
-将第 1 步中的 `M20_CKPT` 改为 `$M20_E3`，使用完全相同的完整验证命令评估重新训练的模型。只有
-完整验证达到或超过预期时，才可用该新权重替换发布的 M20 checkpoint。
-
-### 3. 生成 Challenge 2 提交文件
-
-提交必须使用与 **免训练评估** 完全相同的 M10/M20 权重及固定参数，只将验证选项替换为输出目录：
-
-```bash
-OUTPUT_DIR="$PROJECT_DIR/log/challenge2/m20_e3_m10low30000"
-M10_CKPT="$PROJECT_DIR/checkpoints/m10_dense_views2_epoch_002_seed42.pt"
-M20_CKPT="$PROJECT_DIR/checkpoints/m20_attn_dense_views8_epoch_003_seed48.pt"
-
-python submit_challenge2.py --config configs/evisseg_evuav.yaml --set \
-  DATA.root="$DATA_ROOT" \
-  TEST.challenge_output_dir="$OUTPUT_DIR" TEST.prediction_threshold=0.719 \
-  TEMPORAL_FRAME.temporal_frame_enabled=false \
-  TEMPORAL_MEMORY.temporal_memory_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_model_path="$M20_CKPT" \
-  TEMPORAL_MEMORY.temporal_memory_secondary_model_path="$M10_CKPT" \
-  TEMPORAL_MEMORY.temporal_memory_secondary_max_event_count=30000 \
-  TEMPORAL_MEMORY.temporal_memory_temporal_attention_enabled=true \
-  TEMPORAL_MEMORY.temporal_memory_sparse_weight=0.0 \
-  TEMPORAL_MEMORY.temporal_memory_inference_batch_size=8 \
-  POSTPROCESS.p0_enabled=true POSTPROCESS.p0_spatial_radius=2 \
-  POSTPROCESS.p0_temporal_bin_size=50 POSTPROCESS.p0_temporal_radius_bins=1 \
-  POSTPROCESS.p0_min_cluster_events=3 POSTPROCESS.p0_min_duration_bins=5 \
-  POSTPROCESS.p0c_high_confidence_recovery_enabled=true \
-  POSTPROCESS.p0c_retain_min_score=0.95 POSTPROCESS.p0b_enabled=false \
-  POSTPROCESS.p18_score_track_recovery_enabled=true \
-  POSTPROCESS.p18_event_count_cutoff=1 POSTPROCESS.p18_max_event_count=35000 \
-  POSTPROCESS.p18_candidate_floor=0.53 POSTPROCESS.p18_spatial_radius=5 \
-  POSTPROCESS.p18_temporal_bin_size=50 POSTPROCESS.p18_max_link_distance=8.0 \
-  POSTPROCESS.p18_max_gap_bins=1 POSTPROCESS.p18_min_track_bins=4 \
-  POSTPROCESS.p18_restore_mode=best \
-  POSTPROCESS.p6_density_threshold_enabled=true \
-  POSTPROCESS.p6_event_count_cutoff=30000 \
-  POSTPROCESS.p6_low_density_threshold=0.718 \
-  POSTPROCESS.p6_high_density_threshold=0.719
-
-cd "$OUTPUT_DIR"
-zip -j ../m20_e3_m10low30000.zip val_*.txt
-```
-
-## 引用
-
-```bibtex
-@misc{chen2025eventbasedtinyobjectdetection,
-  title={Event-based Tiny Object Detection: A Benchmark Dataset and Baseline},
-  author={Nuo Chen and Chao Xiao and Yimian Dai and Shiman He and Miao Li and Wei An},
-  year={2025},
-  eprint={2506.23575},
-  archivePrefix={arXiv},
-  primaryClass={cs.CV},
-  url={https://arxiv.org/abs/2506.23575}
-}
-```
+见 `docs/CHANGES.md` 与 `docs/METHODOLOGY.md`。

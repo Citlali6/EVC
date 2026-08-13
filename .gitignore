@@ -17,3 +17,6 @@ dataset/val/
 # Misc
 .DS_Store
 *.swp
+
+# Local caches
+.pytest_cache/
